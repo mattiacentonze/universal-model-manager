@@ -1,6 +1,7 @@
 import type { Page } from "playwright-core";
 import { BrowserManager } from "./browser-manager.js";
 import { CHATGPT_TEMPORARY_CHAT_URL, SELECTORS } from "./selectors.js";
+import { resolveEffortIndex } from "./models.js";
 import { logger } from "../shared/logger.js";
 
 export interface RunOptions {
@@ -8,6 +9,43 @@ export interface RunOptions {
   onDelta?: (delta: string) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
+}
+
+async function applyEffortLevel(page: Page, modelId: string | undefined): Promise<void> {
+  if (!modelId) return;
+  const targetIndex = resolveEffortIndex(modelId);
+  if (targetIndex === undefined) return;
+
+  try {
+    const effortBtn = page.locator(SELECTORS.effortButton).first();
+    if (!await effortBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      return; // Account does not have effort dropdown (e.g. Free/Luna)
+    }
+
+    await effortBtn.click({ timeout: 2000 }).catch(() => {});
+    const slider = page.locator(SELECTORS.effortSlider).first();
+    if (await slider.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const min = Number(await slider.getAttribute("aria-valuemin")) || 0;
+      const max = Number(await slider.getAttribute("aria-valuemax")) || 4;
+      let current = Number(await slider.getAttribute("aria-valuenow")) || 0;
+      const clampedTarget = Math.min(Math.max(targetIndex, min), max);
+
+      let attempts = 0;
+      while (current !== clampedTarget && attempts < 10) {
+        attempts++;
+        const key = clampedTarget > current ? "ArrowRight" : "ArrowLeft";
+        await slider.press(key);
+        await page.waitForTimeout(80);
+        const updated = Number(await slider.getAttribute("aria-valuenow"));
+        if (updated === current) break;
+        current = updated;
+      }
+      logger.debug(`Reasoning effort set to index ${current} (target was ${targetIndex})`);
+    }
+    await page.keyboard.press("Escape").catch(() => {});
+  } catch (err) {
+    logger.warn(`Could not set reasoning effort slider: ${err}`);
+  }
 }
 
 export class ChatGptRunner {
@@ -29,11 +67,14 @@ export class ChatGptRunner {
       const composer = page.locator(SELECTORS.composer).first();
       await composer.waitFor({ state: "visible", timeout: 30_000 });
 
-      // 2. Insert prompt into composer
+      // 2. Select reasoning effort if available on Plus/Pro
+      await applyEffortLevel(page, options.modelId);
+
+      // 3. Insert prompt into composer
       await composer.fill(prompt);
       await page.waitForTimeout(200);
 
-      // 3. Send prompt
+      // 4. Send prompt
       const sendButton = page.locator(SELECTORS.sendButton).first();
       if (await sendButton.isVisible().catch(() => false)) {
         await sendButton.click();
@@ -41,9 +82,9 @@ export class ChatGptRunner {
         await composer.press("Enter");
       }
 
-      logger.debug(`Prompt submitted. Waiting for assistant generation...`);
+      logger.debug(`Prompt submitted for model ${options.modelId || "auto"}. Waiting for assistant generation...`);
 
-      // 4. Stream response
+      // 5. Stream response
       let fullText = "";
       let lastReportedLen = 0;
       const startTime = Date.now();
@@ -78,7 +119,6 @@ export class ChatGptRunner {
         const hasCopyAction = await page.locator(SELECTORS.copyButton).last().isVisible().catch(() => false);
 
         if (!isGenerating && hasCopyAction && currentContent.length > 0) {
-          // Extra short wait to catch any final DOM flush
           await page.waitForTimeout(300);
           const finalContent = (await assistantTurn.innerText().catch(() => "")) || currentContent;
           if (finalContent.length > lastReportedLen) {
