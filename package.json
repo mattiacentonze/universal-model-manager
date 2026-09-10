@@ -1,0 +1,56 @@
+{
+  "name": "opencode-universal-auth",
+  "version": "0.1.0",
+  "description": "Universal authentication, fallback, and ChatGPT Web integration plugin for OpenCode",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "universal-auth": "./dist/cli.js",
+    "opencode-universal-auth": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./openai": {
+      "import": "./dist/openai/index.js",
+      "types": "./dist/openai/index.d.ts"
+    },
+    "./fallback": {
+      "import": "./dist/fallback/index.js",
+      "types": "./dist/fallback/index.d.ts"
+    },
+    "./chatgpt-web": {
+      "import": "./dist/chatgpt-web/index.js",
+      "types": "./dist/chatgpt-web/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js 2>/dev/null || true",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.1.0"
+  },
+  "dependencies": {
+    "@cortexkit/opencode-openai-auth": "^0.7.1",
+    "jsonc-parser": "^3.3.1",
+    "opencode-runtime-fallback": "^0.2.4",
+    "playwright-core": "^1.50.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.30",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}
