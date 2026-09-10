@@ -74,5 +74,6 @@ export default {
 };
 
 export { openaiServerPlugin } from "./openai/index.js";
+export { antigravityServerPlugin } from "./antigravity/index.js";
 export { chatgptWebServerPlugin, getOrStartBridgeServer } from "./chatgpt-web/index.js";
 export { fallbackPlugin } from "./fallback/index.js";

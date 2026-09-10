@@ -2,10 +2,12 @@
 
 Unified authentication, runtime fallback, and ChatGPT Web integration for [OpenCode](https://opencode.ai).
 
-`opencode-universal-auth` combines the power of:
-1. **OpenAI OAuth** (via `@cortexkit/opencode-openai-auth`): Use your ChatGPT Plus/Pro subscription natively in OpenCode without API fees.
-2. **ChatGPT Web Provider**: Connect OpenCode directly to your authenticated ChatGPT Web session via a local loopback bridge.
-3. **Runtime Fallback Engine** (via `opencode-runtime-fallback`): Seamlessly switch to backup models on rate limits, quota exhaustion, or service failures.
+`opencode-universal-auth` replaces fragmented plugins by combining:
+1. **OpenAI OAuth** (Codex backend): Use your ChatGPT Plus/Pro subscription natively in OpenCode without pay-as-you-go API keys.
+2. **Google / Antigravity OAuth**: Direct access to Gemini 3 / Claude models via Antigravity credentials.
+3. **ChatGPT Web Provider**: Access ChatGPT Web via a local loopback bridge with temporary chat isolation and streaming.
+4. **Runtime Fallback Engine**: Automatic model replay across all configured providers on rate limits (429), quota exhaustion, or 5xx server errors.
+5. **Unified TUI Sidebar**: Displays OpenAI quota (5h / weekly), Antigravity credits, and ChatGPT Web session status in OpenCode's right sidebar.
 
 ---
 
@@ -20,9 +22,9 @@ cd ~/.config/opencode
 npm install opencode-universal-auth
 ```
 
-### 2. Automatic Configuration
+### 2. One-Command Setup
 
-Run the setup wizard to automatically register the plugin and the `chatgpt-web` provider in your `opencode.jsonc`:
+Run the setup wizard to configure `opencode.jsonc` and `tui.json`, automatically superseding the legacy plugins:
 
 ```bash
 npx universal-auth setup
@@ -30,17 +32,19 @@ npx universal-auth setup
 
 ### 3. Log In
 
-- **For OpenAI OAuth (Codex backend)**:
-  Inside OpenCode, run:
+- **OpenAI (Codex)**:
   ```text
   /login openai
   ```
-- **For ChatGPT Web (Browser backend)**:
-  Run the interactive browser login:
+- **Google / Antigravity**:
+  ```text
+  /login google
+  ```
+- **ChatGPT Web**:
   ```bash
   npx universal-auth login chatgpt-web
   ```
-  A Google Chrome window will open. Log in to your ChatGPT account. Once logged in, session credentials will be saved securely to `~/.config/opencode/universal-auth/chatgpt-storage-state.json` (with `0600` permissions).
+  A Google Chrome window opens. Log in to your ChatGPT account. Session credentials are saved with restrictive `0600` permissions.
 
 ---
 
@@ -52,7 +56,8 @@ In `opencode.jsonc`:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "opencode-universal-auth"
+    "opencode-universal-auth",
+    "opencode-universal-auth/antigravity"
   ],
   "model": "openai/gpt-6-astra",
   "provider": {
@@ -90,53 +95,58 @@ In `opencode.jsonc`:
 }
 ```
 
+In `tui.json`:
+
+```json
+{
+  "plugin": [
+    "opencode-universal-auth"
+  ]
+}
+```
+
 ---
 
 ## Submodule Entrypoints
 
-If you prefer loading individual components independently, `opencode-universal-auth` exposes separate entrypoints:
+- `opencode-universal-auth`: OpenAI OAuth + Fallback + ChatGPT Web bridge
+- `opencode-universal-auth/antigravity`: Google / Antigravity OAuth
+- `opencode-universal-auth/openai`: OpenAI OAuth only
+- `opencode-universal-auth/fallback`: Runtime Fallback only
+- `opencode-universal-auth/chatgpt-web`: ChatGPT Web bridge only
+- `opencode-universal-auth/tui`: Unified TUI sidebar widget
 
-- `opencode-universal-auth` (All-in-one: OpenAI OAuth + Fallback + ChatGPT Web bridge)
-- `opencode-universal-auth/openai` (OpenAI OAuth only)
-- `opencode-universal-auth/fallback` (Runtime Fallback engine only)
-- `opencode-universal-auth/chatgpt-web` (ChatGPT Web provider & bridge only)
+---
+
+## TUI Sidebar & Quota Information
+
+In OpenCode's right-hand sidebar, `opencode-universal-auth` renders:
+
+1. **OpenAI Widget**:
+   - 5-hour rolling quota (%)
+   - Weekly quota (%)
+   - Active account and routing strategy
+2. **Antigravity Widget**:
+   - Gemini & Claude credit/quota usage
+   - Active account tier
+3. **ChatGPT Web Widget**:
+   - Status: Active (Logged In) / Logged Out
+   - Recent turns count (in active 3-hour rolling window)
+   - Rate-limit reset indicator if ChatGPT hits a temporary throttle
 
 ---
 
 ## CLI Commands
 
-The package includes the `universal-auth` CLI:
-
 | Command | Description |
 |---|---|
 | `universal-auth status` | Show status of config, OAuth account, and ChatGPT Web session |
 | `universal-auth login chatgpt-web` | Open browser window to authenticate with ChatGPT |
-| `universal-auth setup` | Idempotently update `opencode.jsonc` with provider definitions |
+| `universal-auth setup` | Idempotently update `opencode.jsonc` and `tui.json` |
 | `universal-auth bridge [--port 17842]` | Manually start the local loopback bridge daemon |
-
----
-
-## In-TUI Slash Commands
-
-Inside OpenCode, the following commands are available:
-
-- `/login openai`: Authenticate via ChatGPT Plus/Pro OAuth
-- `/universal-status`: Inspect status of all universal auth subsystems
-- `/universal-chatgpt-web status`: Check ChatGPT Web bridge and session status
-- `/universal-chatgpt-web login`: Trigger browser login
-- `/openai-quota`, `/openai-account`, `/openai-routing`: Native quota and account management
-
----
-
-## Architecture & Security Model
-
-- **Loopback-Only**: The local bridge binds strictly to `127.0.0.1`. Remote network connections are rejected.
-- **Credential Safety**: ChatGPT Web cookies and tokens are stored in a private directory with `0o600` permissions. No credentials are transmitted to third parties.
-- **Browser-Only v1**: The initial release operates purely in browser-only mode (text streaming and responses), without local shell or filesystem access from ChatGPT Web turns, eliminating prompt-injection file-modification vectors.
-- **Fail-Closed**: Missing models or network interruptions fail explicitly with clean error messages for the fallback engine to catch.
 
 ---
 
 ## License
 
-MIT (see [LICENSE](LICENSE)). Built upon works from `@cortexkit/opencode-openai-auth`, `opencode-runtime-fallback`, and `codex-chatgpt-web`.
+MIT (see [LICENSE](LICENSE)). Built upon works from `@cortexkit/opencode-openai-auth`, `@cortexkit/opencode-antigravity-auth`, `opencode-runtime-fallback`, and `codex-chatgpt-web`.

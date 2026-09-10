@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { CHATGPT_WEB_MODELS } from "./models.js";
 import { ChatGptRunner } from "./chatgpt-runner.js";
 import { SessionStore } from "./session-store.js";
+import { usageTracker } from "./usage-tracker.js";
 import { logger } from "../shared/logger.js";
 
 export interface BridgeServerOptions {
@@ -145,11 +146,13 @@ export class BridgeServer {
               model,
               choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
             };
+            usageTracker.recordTurn();
             res.write(`data: ${JSON.stringify(endChunk)}\n\n`);
             res.write("data: [DONE]\n\n");
             res.end();
           } else {
             const answer = await this.runner.runPrompt(prompt, { modelId: model });
+            usageTracker.recordTurn();
             const responseData = {
               id,
               object: "chat.completion",
@@ -197,11 +200,13 @@ export class BridgeServer {
                 model,
               },
             };
+            usageTracker.recordTurn();
             res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
             res.write("data: [DONE]\n\n");
             res.end();
           } else {
             const answer = await this.runner.runPrompt(prompt, { modelId: model });
+            usageTracker.recordTurn();
             res.writeHead(200, { "content-type": "application/json" });
             res.end(
               JSON.stringify({
