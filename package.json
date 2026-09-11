@@ -1,12 +1,13 @@
 {
-  "name": "opencode-universal-auth",
+  "name": "universal-model-manager",
   "version": "0.1.0",
-  "description": "Universal authentication, fallback, and ChatGPT Web integration plugin for OpenCode",
+  "description": "Unified model manager for OpenCode: CortexKit OpenAI/ChatGPT OAuth + Antigravity auth, web bridge, runtime fallback, delegation router, resumable wizard, and unified TUI sidebar.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "universal-auth": "./dist/cli.js",
-    "opencode-universal-auth": "./dist/cli.js"
+    "universal-model-manager": "./dist/cli.js",
+    "umm": "./dist/cli.js",
+    "universal-auth": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,14 +48,16 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js 2>/dev/null || true",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
     "typecheck": "tsc --noEmit",
+    "checks": "npm run typecheck",
     "test": "vitest run"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.1.0"
   },
   "dependencies": {
+    "@cortexkit/antigravity-auth-core": "^2.2.1",
     "@cortexkit/opencode-antigravity-auth": "^2.2.1",
     "@cortexkit/opencode-openai-auth": "^0.7.1",
     "jsonc-parser": "^3.3.1",

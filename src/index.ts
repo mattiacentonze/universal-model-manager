@@ -1,79 +1,41 @@
-import type { Hooks, Plugin } from "@opencode-ai/plugin";
+import type { Plugin, PluginModule } from "@opencode-ai/plugin";
 import { openaiServerPlugin } from "./openai/index.js";
 import { chatgptWebServerPlugin } from "./chatgpt-web/index.js";
 import { fallbackPlugin } from "./fallback/index.js";
-import { logger } from "./shared/logger.js";
+import { managerRouterHooks } from "./router/index.js";
+import { composeHooks } from "./hooks/compose.js";
+import { managerHooks } from "./manager/hooks.js";
 
-export const universalAuthPlugin: Plugin = async (input, options) => {
-  let openaiHooks: Hooks = {};
-  let webHooks: Hooks = {};
-  let fallbackHooks: Hooks = {};
+import { PLUGIN_ID, PLUGIN_ALIASES } from "./shared/constants.js";
 
-  try {
-    openaiHooks = await openaiServerPlugin(input, options);
-  } catch (err) {
-    logger.warn(`Failed to initialize OpenAI auth submodule: ${err}`);
-  }
+/** The OpenCode server plugin for this package: composes all submodules. */
+export const universalModelManagerPlugin: Plugin = async (input, options) => {
+  // Auth and fallback are required core: fail loudly instead of silently
+  // claiming active with empty hooks.
+  const [openaiHooks, webHooks, fallbackHooks] = await Promise.all([
+    openaiServerPlugin(input, options),
+    chatgptWebServerPlugin(input, options),
+    fallbackPlugin(input, options),
+  ]);
 
-  try {
-    webHooks = await chatgptWebServerPlugin(input, options);
-  } catch (err) {
-    logger.warn(`Failed to initialize ChatGPT Web submodule: ${err}`);
-  }
+  const routingHooks = managerRouterHooks(undefined);
 
-  try {
-    fallbackHooks = await fallbackPlugin(input, options);
-  } catch (err) {
-    logger.warn(`Failed to initialize Runtime Fallback submodule: ${err}`);
-  }
+  const managerServerHooks = managerHooks();
 
-  return {
-    auth: openaiHooks.auth,
-
-    config: async (cfg: any) => {
-      if (openaiHooks.config) await openaiHooks.config(cfg);
-      if (webHooks.config) await webHooks.config(cfg);
-      if (fallbackHooks.config) await fallbackHooks.config(cfg);
-
-      // Register universal-status slash command
-      if (!cfg.command) cfg.command = {};
-      cfg.command["universal-status"] = {
-        description: "Display universal auth status (OpenAI OAuth + ChatGPT Web + Fallback)",
-        template: "Universal auth status: $ARGUMENTS",
-      };
-    },
-
-    "chat.headers": openaiHooks["chat.headers"],
-    "chat.params": openaiHooks["chat.params"],
-
-    "command.execute.before": async (data, output) => {
-      if (data.command === "universal-status") {
-        output.parts.push({
-          type: "text",
-          text: "[Universal Auth Status]\n- OpenAI OAuth hook: Active\n- Runtime Fallback engine: Active\n- ChatGPT Web bridge: Active",
-        } as any);
-        return;
-      }
-      if (openaiHooks["command.execute.before"]) {
-        await openaiHooks["command.execute.before"](data, output);
-      }
-      if (webHooks["command.execute.before"]) {
-        await webHooks["command.execute.before"](data, output);
-      }
-    },
-
-    event: fallbackHooks.event,
-    "tool.execute.after": fallbackHooks["tool.execute.after"],
-    "chat.message": fallbackHooks["chat.message"],
-  };
+  // Manager populates the tier agents FIRST so the runtime fallback config hook
+  // (composed after) captures the manager's per-agent fallback chains.
+  return composeHooks(routingHooks, openaiHooks, webHooks, fallbackHooks, managerServerHooks);
 };
 
-export default {
-  id: "opencode-universal-auth",
-  server: universalAuthPlugin,
-};
+const plugin: PluginModule & { id: string } = { id: PLUGIN_ID, server: universalModelManagerPlugin };
 
-export { openaiServerPlugin } from "./openai/index.js";
-export { antigravityServerPlugin } from "./antigravity/index.js";
+export default plugin;
+
+export { openaiServerPlugin, openaiServerPlugin as openaiAuth } from "./openai/index.js";
+export { antigravityServerPlugin, antigravityServerPlugin as antigravityAuth } from "./antigravity/index.js";
 export { chatgptWebServerPlugin, getOrStartBridgeServer } from "./chatgpt-web/index.js";
 export { fallbackPlugin } from "./fallback/index.js";
+export { managerRouterHooks } from "./router/index.js";
+export { composeHooks } from "./hooks/compose.js";
+export * from "./manager/index.js";
+export { PLUGIN_ID, PLUGIN_ALIASES, ANTIGRAVITY_ENTRY } from "./shared/constants.js";

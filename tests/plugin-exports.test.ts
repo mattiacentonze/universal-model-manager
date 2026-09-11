@@ -4,6 +4,9 @@ import rootPlugin, {
   antigravityServerPlugin,
   chatgptWebServerPlugin,
   fallbackPlugin,
+  universalModelManagerPlugin,
+  PLUGIN_ID,
+  PLUGIN_ALIASES,
 } from "../src/index.js";
 import openaiModule from "../src/openai/index.js";
 import antigravityModule from "../src/antigravity/index.js";
@@ -11,9 +14,13 @@ import fallbackModule from "../src/fallback/index.js";
 import chatgptWebModule from "../src/chatgpt-web/index.js";
 
 describe("Plugin Module Exports", () => {
-  it("exports valid root plugin definition", () => {
-    expect(rootPlugin.id).toBe("opencode-universal-auth");
+  it("uses the model-manager id and keeps backwards alias", () => {
+    expect(PLUGIN_ID).toBe("universal-model-manager");
+    expect(PLUGIN_ALIASES).toContain("universal-model-manager");
+    expect(PLUGIN_ALIASES).toContain("opencode-universal-auth");
+    expect(rootPlugin.id).toBe(PLUGIN_ID);
     expect(typeof rootPlugin.server).toBe("function");
+    expect(typeof universalModelManagerPlugin).toBe("function");
     expect(typeof openaiServerPlugin).toBe("function");
     expect(typeof antigravityServerPlugin).toBe("function");
     expect(typeof chatgptWebServerPlugin).toBe("function");
