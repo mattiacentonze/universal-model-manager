@@ -21,8 +21,35 @@ export interface StorageState {
   }>;
 }
 
+export interface ChatGptAccountInfo {
+  name?: string;
+  email?: string;
+  plan?: string;
+  updatedAt?: string;
+}
+
 export class SessionStore {
   constructor(private readonly filePath = getChatGptStorageStatePath()) {}
+
+  getAccountInfo(): ChatGptAccountInfo | null {
+    const infoPath = this.filePath.replace(/\.json$/, "-info.json");
+    if (!existsSync(infoPath)) return null;
+    try {
+      return JSON.parse(readFileSync(infoPath, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+
+  saveAccountInfo(info: ChatGptAccountInfo): void {
+    const infoPath = this.filePath.replace(/\.json$/, "-info.json");
+    try {
+      writeFileSync(infoPath, JSON.stringify(info, null, 2), { mode: 0o600 });
+      chmodSync(infoPath, 0o600);
+    } catch {
+      // Ignored if chmod not supported
+    }
+  }
 
   hasValidSession(): boolean {
     if (!existsSync(this.filePath)) return false;
@@ -30,13 +57,24 @@ export class SessionStore {
       const data = JSON.parse(readFileSync(this.filePath, "utf8")) as StorageState;
       if (!Array.isArray(data.cookies)) return false;
       const now = Date.now() / 1000;
-      // Look for session-like cookies for chatgpt.com or openai.com
+      // Look for real session-like auth cookies or user storage
       const hasAuthCookie = data.cookies.some(
         c => (c.domain.includes("chatgpt.com") || c.domain.includes("openai.com")) &&
-             (c.name.includes("session") || c.name.includes("token") || c.name.startsWith("__Secure-")) &&
+             (
+               c.name === "oai-sc" ||
+               c.name.startsWith("__Secure-next-auth.session-token") ||
+               c.name === "accessToken"
+             ) &&
              (c.expires === -1 || c.expires > now)
       );
-      return hasAuthCookie || data.cookies.length > 3;
+
+      const hasUserStorage = Array.isArray(data.origins) && data.origins.some(
+        o => o.origin.includes("chatgpt.com") &&
+             Array.isArray(o.localStorage) &&
+             o.localStorage.some(item => item.name.startsWith("cache/user-") || item.name.includes("user-"))
+      );
+
+      return hasAuthCookie || hasUserStorage;
     } catch {
       return false;
     }

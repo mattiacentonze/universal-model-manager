@@ -84,12 +84,14 @@ export class ChatGptRunner {
 
       logger.debug(`Prompt submitted for model ${options.modelId || "auto"}. Waiting for assistant generation...`);
 
-      // 5. Stream response
+      // 5. Wait for generation to start
+      await page.waitForTimeout(1000);
+      await page.locator(SELECTORS.stopButton).first().waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+
       let fullText = "";
       let lastReportedLen = 0;
       const startTime = Date.now();
 
-      // Wait until stop button appears or assistant turn element is rendered
       await page.waitForSelector(SELECTORS.assistantTurn, { timeout: 45_000 });
 
       while (Date.now() - startTime < timeout) {
@@ -103,9 +105,13 @@ export class ChatGptRunner {
         }
 
         const assistantTurn = page.locator(SELECTORS.assistantTurn).last();
-        const currentContent = (await assistantTurn.innerText().catch(() => "")) || "";
+        const mdEl = assistantTurn.locator(".markdown").last();
+        const hasMarkdown = (await mdEl.count().catch(() => 0)) > 0;
+        const currentContent = hasMarkdown
+          ? (await mdEl.innerText().catch(() => "")) || ""
+          : (await assistantTurn.innerText().catch(() => "")) || "";
 
-        if (currentContent.length > lastReportedLen) {
+        if (hasMarkdown && currentContent.length > lastReportedLen) {
           const delta = currentContent.slice(lastReportedLen);
           lastReportedLen = currentContent.length;
           fullText = currentContent;
@@ -114,23 +120,22 @@ export class ChatGptRunner {
           }
         }
 
-        // Check if generation completed
+        // Check if generation completed: stop button is gone and markdown answer is present
         const isGenerating = await page.locator(SELECTORS.stopButton).first().isVisible().catch(() => false);
-        const hasCopyAction = await page.locator(SELECTORS.copyButton).last().isVisible().catch(() => false);
 
-        if (!isGenerating && hasCopyAction && currentContent.length > 0) {
-          await page.waitForTimeout(300);
-          const finalContent = (await assistantTurn.innerText().catch(() => "")) || currentContent;
+        if (!isGenerating && hasMarkdown && currentContent.trim().length > 0) {
+          await page.waitForTimeout(400);
+          const finalContent = (await mdEl.innerText().catch(() => "")) || currentContent;
           if (finalContent.length > lastReportedLen) {
             const finalDelta = finalContent.slice(lastReportedLen);
             if (options.onDelta) options.onDelta(finalDelta);
             fullText = finalContent;
           }
           logger.debug(`Generation completed successfully (${fullText.length} chars)`);
-          return fullText;
+          return fullText.trim();
         }
 
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(150);
       }
 
       return fullText;

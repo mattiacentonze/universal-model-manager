@@ -38,5 +38,12 @@ export const SELECTORS = {
     'button[data-testid="model-switcher-dropdown-button"][aria-haspopup="menu"]',
   ].join(", "),
 
+  profileButton: [
+    '[data-testid="profile-button"]',
+    'button[aria-label*="User profile"]',
+    'button[aria-label*="Account"]',
+    '[data-testid="user-menu"]',
+  ].join(", "),
+
   effortSlider: '[data-model-reasoning-effort-slider] [role="slider"]',
 };

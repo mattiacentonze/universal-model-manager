@@ -37,32 +37,84 @@ export class BrowserManager {
     const executablePath = findExecutablePath();
     logger.info(`Launching interactive login browser with ${executablePath}...`);
 
-    // In interactive mode we open a headed browser with a dedicated user data dir
-    const context = await chromium.launchPersistentContext(getChatGptProfileDir(), {
-      executablePath,
-      headless: false,
-      viewport: { width: 1280, height: 900 },
-      args: ["--disable-blink-features=AutomationControlled"],
-    });
-
+    const profileDir = getChatGptProfileDir();
+    let context: BrowserContext | null = null;
     try {
+      context = await chromium.launchPersistentContext(profileDir, {
+        executablePath,
+        headless: false,
+        viewport: { width: 1280, height: 900 },
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--log-level=3",
+          "--silent",
+          "--disable-logging",
+        ],
+      });
+
       const page = context.pages()[0] || (await context.newPage());
-      await page.goto(CHATGPT_BASE_URL, { waitUntil: "domcontentloaded" });
+      // Navigate directly to ChatGPT login portal so user sees login buttons
+      await page.goto("https://chatgpt.com/auth/login", { waitUntil: "domcontentloaded", timeout: 60_000 });
 
-      logger.info("Please log in to ChatGPT in the opened browser window. Waiting for session...");
+      logger.info("Chrome opened on ChatGPT login page. Please complete login. Waiting for authenticated session...");
 
-      // Wait up to 5 minutes for the user to complete login
-      await page.waitForSelector(SELECTORS.composer, { timeout: 300_000 });
+      const timeoutMs = 300_000; // 5 minutes
+      const startTime = Date.now();
+      let loggedIn = false;
 
-      const state = await context.storageState();
-      this.sessionStore.save(state as any);
-      logger.info("Login successful! Session credentials captured.");
-      return true;
+      while (Date.now() - startTime < timeoutMs) {
+        if (page.isClosed()) {
+          logger.warn("Interactive login window was closed by user.");
+          break;
+        }
+
+        // 1. Check profile button / user menu (only visible when truly logged in)
+        const profileBtn = page.locator(SELECTORS.profileButton).first();
+        const hasProfileBtn = await profileBtn.isVisible().catch(() => false);
+
+        // 2. Check localStorage for user key
+        const userKey = await page.evaluate(() => {
+          try {
+            return Object.keys(localStorage).find(k => k.startsWith("cache/user-") || k.includes("user-")) || null;
+          } catch {
+            return null;
+          }
+        }).catch(() => null);
+
+        // 3. The guest "Log in" button must be absent from header/sidebar
+        const hasLoginBtn = await page.locator('button:has-text("Log in"), a:has-text("Log in")').first().isVisible().catch(() => false);
+
+        // 4. Composer must be visible
+        const hasComposer = await page.locator(SELECTORS.composer).first().isVisible().catch(() => false);
+
+        // Truly authenticated: user profile or user key, composer visible, and NOT showing login buttons
+        if ((hasProfileBtn || Boolean(userKey)) && hasComposer && !hasLoginBtn) {
+          loggedIn = true;
+          let accountName = (await profileBtn.innerText().catch(() => "")) || "";
+          accountName = accountName.trim().split("\n")[0] || "";
+
+          logger.info(`Login detected for ${accountName || "user"}! Capturing session credentials...`);
+          await page.waitForTimeout(2000);
+          const state = await context.storageState();
+          this.sessionStore.save(state as any);
+          if (accountName) {
+            this.sessionStore.saveAccountInfo({ name: accountName, updatedAt: new Date().toISOString() });
+          }
+          logger.info("Session credentials captured and saved successfully.");
+          break;
+        }
+
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      return loggedIn;
     } catch (err) {
       logger.error(`Login wait failed or timed out: ${err}`);
       return false;
     } finally {
-      await context.close().catch(() => {});
+      await context?.close().catch(() => {});
     }
   }
 
