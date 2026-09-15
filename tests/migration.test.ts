@@ -72,15 +72,19 @@ describe("Migration Engine", () => {
     expect(formatted).toContain("Codex ChatGPT Web");
 
     // Execute migration
-    const result = executeMigration(report, {
-      importOpenAi: true,
-      importAntigravity: true,
-      importFallback: true,
-      importChatGptWeb: true,
-      replaceInOpenCodeConfig: false,
-      replaceInTuiConfig: false,
-      uninstallLegacyNpmPackages: false,
-    });
+    const result = executeMigration(
+      report,
+      {
+        importOpenAi: true,
+        importAntigravity: true,
+        importFallback: true,
+        importChatGptWeb: true,
+        replaceInOpenCodeConfig: false,
+        replaceInTuiConfig: false,
+        uninstallLegacyNpmPackages: false,
+      },
+      { configDir: tempConfigDir, homeDir: tempHome }
+    );
 
     expect(result.success).toBe(true);
     expect(result.importedItems.length).toBeGreaterThan(0);

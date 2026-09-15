@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { getChatGptStorageStatePath } from "../shared/paths.js";
 import { SessionStore } from "../chatgpt-web/session-store.js";
 import { logger } from "../shared/logger.js";
@@ -6,7 +7,8 @@ import type { DiscoveryReport, MigrationPlan, MigrationResult } from "./types.js
 
 export function executeMigration(
   report: DiscoveryReport,
-  plan: MigrationPlan
+  plan: MigrationPlan,
+  options?: { configDir?: string; homeDir?: string }
 ): MigrationResult {
   const importedItems: string[] = [];
   const errors: string[] = [];
@@ -31,7 +33,10 @@ export function executeMigration(
       if (item.id === "codex-chatgpt-web" && plan.importChatGptWeb) {
         const sourceCookieFile = item.foundFiles.find(f => f.endsWith("storage-state.json"));
         if (sourceCookieFile && existsSync(sourceCookieFile)) {
-          const dest = getChatGptStorageStatePath();
+          const dest = options?.configDir
+            ? join(options.configDir, "universal-auth", "chatgpt-storage-state.json")
+            : getChatGptStorageStatePath();
+          mkdirSync(dirname(dest), { recursive: true });
           copyFileSync(sourceCookieFile, dest);
           const store = new SessionStore(dest);
           if (store.hasValidSession()) {
