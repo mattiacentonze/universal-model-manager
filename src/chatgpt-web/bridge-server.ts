@@ -180,12 +180,20 @@ export class BridgeServer {
               connection: "keep-alive",
             });
 
+            res.write(
+              `data: ${JSON.stringify({
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { type: "message", id },
+              })}\n\n`
+            );
+
             await this.runner.runPrompt(prompt, {
               modelId: model,
               onDelta: delta => {
                 const chunk = {
                   type: "response.output_text.delta",
-                  response_id: id,
+                  item_id: id,
                   delta,
                 };
                 res.write(`data: ${JSON.stringify(chunk)}\n\n`);
@@ -198,6 +206,7 @@ export class BridgeServer {
                 id,
                 status: "completed",
                 model,
+                usage: { input_tokens: 0, output_tokens: 0 },
               },
             };
             usageTracker.recordTurn();
