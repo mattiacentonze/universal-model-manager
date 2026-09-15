@@ -18,6 +18,7 @@ import {
   accountIdFor,
 } from "../src/manager/provider-accounts.js";
 import { handleManagerCommand, loadConfig } from "../src/manager/index.js";
+import { reconcileConfigured } from "../src/manager/auth-status.js";
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), "acc-"));
@@ -201,6 +202,21 @@ describe("Unified manager-facing interface", () => {
     const antiMain = all.find(a => a.provider === "antigravity" && a.main);
     expect(openaiMain?.email).toBe("main1");
     expect(antiMain?.email).toBe("b@x");
+  });
+
+  it("reconcileConfigured preserves user-chosen account aliases by kind+label", () => {
+    const real = getAccounts(dir);
+    const stored = real.map(r => ({
+      id: r.id,
+      kind: r.provider,
+      label: r.label,
+      alias: r.label === "a@x" ? "work" : undefined,
+      main: r.main,
+      configured: r.configured,
+    }));
+    const reconciled = reconcileConfigured(stored, dir);
+    expect(reconciled.find(a => a.label === "a@x")?.alias).toBe("work");
+    expect(reconciled.find(a => a.label === "b@x")?.alias).toBeUndefined();
   });
 
   it("setMainByManagerId: antigravity applies, OpenAI primary delegates (no false success)", async () => {

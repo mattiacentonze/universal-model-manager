@@ -6,5 +6,5 @@
     "declarationDir": "./dist"
   },
   "include": ["src/**/*"],
-  "exclude": ["tests/**/*"]
+  "exclude": ["tests/**/*", "src/tui-compiled/**/*"]
 }

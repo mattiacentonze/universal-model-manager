@@ -5,3 +5,6 @@ dist/
 storage-state.json
 browser-profile/
 coverage/
+src/tui-compiled/
+!vendor/*/dist/
+!vendor/*/dist/**

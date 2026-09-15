@@ -1,0 +1,36 @@
+export interface OAuthAuthDetails {
+    type: 'oauth';
+    refresh: string;
+    access?: string;
+    expires?: number;
+}
+export interface ApiKeyAuthDetails {
+    type: 'api_key';
+    key: string;
+}
+export interface NonOAuthAuthDetails {
+    type: string;
+    [key: string]: unknown;
+}
+export type AuthDetails = OAuthAuthDetails | ApiKeyAuthDetails | NonOAuthAuthDetails;
+export type GetAuth = () => Promise<AuthDetails>;
+export interface RefreshParts {
+    refreshToken: string;
+    projectId?: string;
+    managedProjectId?: string;
+}
+export interface ProjectContextResult {
+    auth: OAuthAuthDetails;
+    effectiveProjectId: string;
+    /**
+     * Plan tier captured from the `loadCodeAssist` payload at project-context
+     * resolution time. Present only when the upstream returned a non-empty
+     * `currentTier.id`; absent when the payload lacked tier info.
+     */
+    capturedTier?: {
+        id: string;
+        paidId?: string;
+        capturedAt: number;
+    };
+}
+//# sourceMappingURL=auth-types.d.ts.map

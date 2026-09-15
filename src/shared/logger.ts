@@ -1,3 +1,7 @@
+import { appendFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LEVEL_WEIGHTS: Record<LogLevel, number> = {
@@ -15,6 +19,20 @@ function redactSensitive(message: string): string {
     .replace(/(cookie:\s*)([^\r\n]+)/gi, "$1[REDACTED_COOKIES]");
 }
 
+function writeLogLine(level: string, prefix: string, msg: string) {
+  const sanitized = redactSensitive(msg);
+  try {
+    const logFile = join(homedir(), ".config", "opencode", "opencode-fallback.log");
+    appendFileSync(logFile, `[${new Date().toISOString()}] [${prefix}] [${level}] ${sanitized}\n`);
+  } catch {}
+
+  // Only print to console if debug is enabled or in non-TTY/standalone CLI mode.
+  // Never print raw console logs inside TUI interactive sessions to prevent input-bar corruption.
+  if (process.env.DEBUG || process.env.UNIVERSAL_AUTH_DEBUG === "1" || (!process.stdout.isTTY && !process.env.OPENCODE_TUI)) {
+    console.log(`[${prefix}] [${level}] ${sanitized}`);
+  }
+}
+
 export class Logger {
   constructor(private readonly prefix: string = "universal-auth", private level: LogLevel = "info") {
     if (process.env.DEBUG || process.env.UNIVERSAL_AUTH_DEBUG === "1") {
@@ -28,25 +46,25 @@ export class Logger {
 
   debug(msg: string, ...args: unknown[]) {
     if (this.shouldLog("debug")) {
-      console.debug(`[${this.prefix}] [DEBUG] ${redactSensitive(msg)}`, ...args);
+      writeLogLine("DEBUG", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
     }
   }
 
   info(msg: string, ...args: unknown[]) {
     if (this.shouldLog("info")) {
-      console.info(`[${this.prefix}] [INFO] ${redactSensitive(msg)}`, ...args);
+      writeLogLine("INFO", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
     }
   }
 
   warn(msg: string, ...args: unknown[]) {
     if (this.shouldLog("warn")) {
-      console.warn(`[${this.prefix}] [WARN] ${redactSensitive(msg)}`, ...args);
+      writeLogLine("WARN", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
     }
   }
 
   error(msg: string, ...args: unknown[]) {
     if (this.shouldLog("error")) {
-      console.error(`[${this.prefix}] [ERROR] ${redactSensitive(msg)}`, ...args);
+      writeLogLine("ERROR", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
     }
   }
 }

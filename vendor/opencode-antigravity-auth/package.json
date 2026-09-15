@@ -1,0 +1,113 @@
+{
+  "name": "@cortexkit/opencode-antigravity-auth",
+  "version": "2.2.1",
+  "description": "Google Antigravity OAuth auth plugin for OpenCode - access Gemini 3 and Claude 4.6 using Google credentials",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "license": "MIT",
+  "author": "CortexKit",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cortexkit/antigravity-auth.git",
+    "directory": "packages/opencode"
+  },
+  "homepage": "https://github.com/cortexkit/antigravity-auth#readme",
+  "bugs": {
+    "url": "https://github.com/cortexkit/antigravity-auth/issues"
+  },
+  "keywords": [
+    "opencode",
+    "google",
+    "antigravity",
+    "gemini",
+    "oauth",
+    "plugin",
+    "auth",
+    "claude"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "opencode": ">=1.17.13 <2"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./tui": {
+      "import": "./src/tui/entry.mjs",
+      "types": "./dist/src/tui.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "src/tui.tsx",
+    "src/tui/entry.mjs",
+    "src/tui/command-dialogs.tsx",
+    "src/tui/file-logger.ts",
+    "src/tui-preferences.ts",
+    "src/sidebar-state.ts",
+    "src/rpc/rpc-client.ts",
+    "src/rpc/rpc-dir.ts",
+    "src/rpc/port-file.ts",
+    "src/rpc/protocol.ts",
+    "src/plugin/command-data.ts",
+    "src/tui-compiled/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && esbuild index.ts --bundle --platform=node --format=esm --external:zod --outfile=dist/index.js --sourcemap && esbuild src/cli.ts --bundle --platform=node --format=esm --external:zod --banner:js=\"#!/usr/bin/env node\" --outfile=dist/cli.js --sourcemap && chmod 0755 dist/cli.js && bun run build:tui",
+    "build:tui": "bunx tsx scripts/build-tui.ts",
+    "build:schema": "bunx tsx script/build-schema.ts",
+    "smoke:tui": "bun scripts/smoke-tui-pack-install.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --isolate ./src",
+    "prepublishOnly": "bun run build && bun run build:tui",
+    "test:e2e:models": "bunx tsx script/test-models.ts",
+    "test:e2e:regression": "bunx tsx script/test-regression.ts"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "*",
+    "@opentui/core": ">=0.4.5",
+    "@opentui/keymap": ">=0.4.5",
+    "@opentui/solid": ">=0.4.5",
+    "solid-js": ">=1.9.0",
+    "typescript": "^5 || ^6"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    },
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/keymap": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.7",
+    "zod-to-json-schema": "^3.25.1",
+    "@opencode-ai/sdk": "1.17.13"
+  },
+  "dependencies": {
+    "@cortexkit/antigravity-auth-core": "2.2.1",
+    "jsonc-parser": "^3.3.1",
+    "xdg-basedir": "^5.1.0",
+    "zod": "^4.0.0"
+  },
+  "bin": {
+    "antigravity-auth": "./dist/cli.js"
+  }
+}

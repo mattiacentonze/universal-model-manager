@@ -15,5 +15,6 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@opentui/solid"
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["src/tui-compiled", "src/tui-compiled/**/*", "tests/clicks.bun.spec.ts"]
 }

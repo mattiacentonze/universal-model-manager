@@ -1,0 +1,20 @@
+export declare const DUMP_SESSION_HEADER = "x-cortexkit-openai-auth-dump-session";
+type DumpHeaders = ConstructorParameters<typeof Headers>[0];
+type DumpTransport = 'http' | 'websocket';
+declare const DUMP_PHASES: readonly ['http', 'prewarm', 'main'];
+type DumpPhase = (typeof DUMP_PHASES)[number];
+export declare function dumpCodexRequest(input: {
+    sessionID?: string | null;
+    transport: DumpTransport;
+    phase: DumpPhase;
+    bodyText: string;
+    accountId?: string;
+    url?: string;
+    method?: string;
+    headers?: DumpHeaders;
+    status?: number;
+    error?: string;
+}): Promise<void>;
+export declare function dumpDiagnostic(event: Record<string, unknown>): Promise<void>;
+export declare function resetDumpStateForTest(): void;
+export {};

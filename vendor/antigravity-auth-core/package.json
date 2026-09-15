@@ -1,0 +1,49 @@
+{
+  "name": "@cortexkit/antigravity-auth-core",
+  "version": "2.2.1",
+  "description": "Harness-agnostic core for Google Antigravity OAuth: transport, fingerprint, request transforms, accounts, quota",
+  "type": "module",
+  "license": "MIT",
+  "author": "CortexKit",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cortexkit/antigravity-auth.git",
+    "directory": "packages/core"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./file-lock": {
+      "types": "./dist/file-lock.d.ts",
+      "import": "./dist/file-lock.js"
+    },
+    "./atomic-write": {
+      "types": "./dist/atomic-write.d.ts",
+      "import": "./dist/atomic-write.js"
+    },
+    "./fetch-timeout": {
+      "types": "./dist/fetch-timeout.d.ts",
+      "import": "./dist/fetch-timeout.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --isolate ./src",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "xdg-basedir": "^5.1.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {}
+}

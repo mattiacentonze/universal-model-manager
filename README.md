@@ -105,15 +105,13 @@ On every load the manager recomputes the *first missing valid setting* and resum
 
 | Command | Behaviour |
 |---|---|
-| `/u-wizard` | Open the interactive setup wizard (alias of `/u-setup`). |
+| `/connect-google` | Add a new Google (Antigravity) account via OAuth. |
+| `/accounts` | Open provider-account controls and native login/account dialogs (alias `/u-accounts`). |
+| `/setup` | Open the interactive setup wizard (alias `/u-setup`). |
+| `/fallback-list` | Open the tier settings and ordered fallback editor (alias `/u-fallbacks`). |
+| `/reset` | **Reset only the manager config + wizard** to defaults. **Provider credentials are NEVER touched.** (alias `/u-reset`) |
 | `/u-status` | Unified provider + router + wizard summary. |
-| `/u-setup` | Open the interactive setup wizard. |
-| `/u-accounts` | Open provider-account controls and native login/account dialogs. |
-| `/u-main` | Open account-selection controls. OpenAI uses its native routing preferences; its primary host login is separate. |
-| `/u-fallbacks` | Open the tier settings and ordered fallback editor. |
-| `/u-router` | Open graphical orchestrator, tier, variant and fallback settings. |
 | `/u-migrate` | Apply the manager config migration to the current on-disk version. |
-| `/u-reset` | **Reset only the manager config + wizard** to defaults. **Provider credentials are NEVER touched.** |
 | `/universal-status` | Backwards-compatible alias of `/u-status`. |
 
 > **Scope of `/u-reset`**: after confirmation, it resets manager settings and wizard progress. It does **not** reset provider account ordering or delete provider credentials/browser sessions. Restart OpenCode to apply reset routing settings. The CLI `reset` requires `UNIVERSAL_AUTH_CONFIRM_RESET=1`.

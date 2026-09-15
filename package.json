@@ -43,26 +43,32 @@
   ],
   "files": [
     "dist",
+    "vendor",
     "src/tui",
+    "src/tui-compiled",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/vendor && cp -r vendor dist/vendor && npm run build:tui",
+    "build:tui": "node scripts/build-tui.mjs",
     "typecheck": "tsc --noEmit",
     "checks": "npm run typecheck",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:clicks": "bun test --conditions browser ./tests/clicks.bun.spec.ts"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.1.0"
   },
   "dependencies": {
-    "@cortexkit/antigravity-auth-core": "^2.2.1",
-    "@cortexkit/opencode-antigravity-auth": "^2.2.1",
-    "@cortexkit/opencode-openai-auth": "^0.7.1",
+    "@opentui/core": "^0.5.11",
+    "@opentui/solid": "^0.5.11",
+    "ai": "^7.0.95",
     "jsonc-parser": "^3.3.1",
-    "opencode-runtime-fallback": "^0.2.4",
-    "playwright-core": "^1.50.0"
+    "playwright-core": "^1.50.0",
+    "solid-js": "^1.9.12",
+    "xdg-basedir": "^5.1.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.18.30",
