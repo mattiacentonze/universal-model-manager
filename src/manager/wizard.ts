@@ -80,7 +80,13 @@ export function completeStep(step: WizardStep, values: Record<string, unknown>, 
     if (TIER_NAMES.every(t => cfg.wizard!.tiersConfirmed![t])) markCompleted(cfg, "tiers");
   } else if (step === "router") {
     if (typeof values.orchestrator === "string" && isValidModelId(values.orchestrator)) {
-      cfg.router = { ...cfg.router, orchestrator: values.orchestrator, enabled: values.enabled !== false };
+      cfg.router = {
+        ...cfg.router,
+        orchestrator: values.orchestrator,
+        enabled: values.enabled !== false,
+        ...(typeof values.orchestratorVariant === "string" ? { orchestratorVariant: values.orchestratorVariant } : {}),
+        ...(Array.isArray(values.orchestratorFallbacks) ? { orchestratorFallbacks: values.orchestratorFallbacks as string[] } : {}),
+      };
       cfg.wizard!.routerConfirmed = true;
       markCompleted(cfg, "router");
     }

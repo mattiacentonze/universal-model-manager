@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin";
+// Vendored cortexkit Antigravity auth plugin (compiled bundle lives in vendor/).
 // @ts-ignore
-import { GoogleOAuthPlugin, AntigravityCLIOAuthPlugin } from "@cortexkit/opencode-antigravity-auth";
+import { GoogleOAuthPlugin, AntigravityCLIOAuthPlugin } from "../../vendor/opencode-antigravity-auth/dist/index.js";
 
 export const antigravityServerPlugin: Plugin = async (input, options) => {
   const pluginFn = GoogleOAuthPlugin || AntigravityCLIOAuthPlugin;

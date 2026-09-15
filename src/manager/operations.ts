@@ -19,12 +19,15 @@ export function resetManager(dir?: string): ManagerConfig {
  * with a flat model string, optional variant and ordered fallback chain.
  */
 export function buildAgentConfig(router: RouterSettings): NonNullable<Config["agent"]> {
+  const defaultFallbacks = [...new Set([router.tiers.heavy.model, ...tierTargets(router.tiers.heavy).map(target => target.model)])].filter(model => model !== router.orchestrator);
+  const orchestratorFallbacks = router.orchestratorFallbacks?.length ? router.orchestratorFallbacks : defaultFallbacks;
   const agents: NonNullable<Config["agent"]> = {
     build: {
       model: router.orchestrator,
       mode: "primary",
       description: "Primary orchestrator",
-      fallback_models: [...new Set([router.tiers.heavy.model, ...tierTargets(router.tiers.heavy).map(target => target.model)])].filter(model => model !== router.orchestrator),
+      fallback_models: orchestratorFallbacks,
+      ...(router.orchestratorVariant ? { variant: router.orchestratorVariant } : {}),
     },
   };
   const steps = { fast: 32, medium: 64, heavy: 128 } as const;

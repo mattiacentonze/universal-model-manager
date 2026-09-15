@@ -1,7 +1,7 @@
 import type { AccountEntry, ProviderKind } from "./types.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import type { AccountProvider, ProviderAccount } from "./provider-accounts.js";
-import { getOpenAIAccounts, getAntigravityAccounts } from "./provider-accounts.js";
+import { getOpenAIAccounts, getAntigravityAccounts, getOpenCodeZenAccounts, isOpencodeConfigured } from "./provider-accounts.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getUniversalAuthDataDir } from "../shared/paths.js";
@@ -17,6 +17,7 @@ import { getUniversalAuthDataDir } from "../shared/paths.js";
 export function realAccounts(kind: ProviderKind, configDir = getOpenCodeConfigDir()): ProviderAccount[] {
   if (kind === "openai") return getOpenAIAccounts(configDir);
   if (kind === "antigravity") return getAntigravityAccounts(configDir);
+  if (kind === "opencode") return getOpenCodeZenAccounts(configDir);
   return [];
 }
 
@@ -36,6 +37,9 @@ export function providerConfigured(kind: ProviderKind, configDir = getOpenCodeCo
     // ChatGPT web session is tracked separately by the bridge session store.
     const stateFile = join(getUniversalDataDir(configDir), "chatgpt-storage-state.json");
     return existsSync(stateFile) ? true : false;
+  }
+  if (kind === "opencode") {
+    return isOpencodeConfigured(configDir);
   }
   return realAccounts(kind, configDir).some(a => a.configured);
 }
@@ -57,18 +61,32 @@ function kindOf(provider: AccountProvider): ProviderKind {
  * `configured` status.
  */
 export function reconcileConfigured(accounts: AccountEntry[], configDir = getOpenCodeConfigDir()): AccountEntry[] {
-  void accounts; // the real store is authoritative; the stored mirror is not trusted.
-  const real = [...realAccounts("openai", configDir), ...realAccounts("antigravity", configDir)];
-  const mirrored: AccountEntry[] = real.map(r => ({
-    id: r.id,
-    kind: kindOf(r.provider),
-    label: r.label,
-    main: r.main,
-    configured: r.configured,
-  }));
+  const real = [
+    ...realAccounts("openai", configDir),
+    ...realAccounts("antigravity", configDir),
+    ...realAccounts("opencode", configDir).filter(a => a.configured),
+  ];
+  const webAccounts = accounts.filter(a => a.kind === "chatgpt-web");
+  // Preserve user-chosen aliases by matching on kind + label (stable real-store identity).
+  const aliasByKey = new Map<string, string>();
+  for (const a of accounts) {
+    if (a.alias) aliasByKey.set(`${a.kind}:${a.label}`, a.alias);
+  }
+  const mirrored: AccountEntry[] = real.map(r => {
+    const kind = kindOf(r.provider);
+    return {
+      id: r.id,
+      kind,
+      label: r.label,
+      alias: aliasByKey.get(`${kind}:${r.label}`),
+      main: r.main,
+      configured: r.configured,
+    };
+  });
   if (mirrored.length > 0) {
-    // real credentialed mains first, then remaining real accounts.
-    return mirrored.sort((a, b) => Number(b.configured && b.main) - Number(a.configured && a.main));
+    // real credentialed mains first, then remaining real accounts, plus any web accounts.
+    const sorted = mirrored.sort((a, b) => Number(b.configured && b.main) - Number(a.configured && a.main));
+    return [...sorted, ...webAccounts];
   }
   return accounts;
 }

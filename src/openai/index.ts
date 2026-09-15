@@ -1,8 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin";
 
-// Import the official cortexkit plugin directly
+// Vendored cortexkit OpenAI auth plugin (compiled bundle lives in vendor/).
 // @ts-ignore
-import cortexkitPkg from "@cortexkit/opencode-openai-auth";
+import cortexkitPkg from "../../vendor/opencode-openai-auth/dist/index.js";
 
 export const openaiServerPlugin: Plugin = async (input, options) => {
   const pkg: any = cortexkitPkg;

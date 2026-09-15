@@ -1,5 +1,5 @@
 import type { AccountEntry, ManagerConfig } from "./types.js";
-import { firstMissingStep, loadConfig, managerFilePath, migrateConfig, saveConfig } from "./store.js";
+import { firstMissingStep, loadConfig, managerFilePath, migrateConfig, saveConfig, tierTargets } from "./store.js";
 import { resetManager } from "./operations.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { countRealAccounts, providerConfigured } from "./auth-status.js";
@@ -26,6 +26,11 @@ export function ensureSingleMain(accounts: AccountEntry[]): AccountEntry[] {
 function accountLine(a: AccountEntry, real: number): string {
   const live = a.kind === "openai" || a.kind === "antigravity" ? ` (${real} real)` : "";
   return `  ${a.id} [${a.kind}]${a.main ? " (main)" : ""}: ${a.label} — ${a.configured ? "ready" : "pending"}${a.configured ? "" : live}`;
+}
+
+/** Display form of a fallback target: alias/provider/model-variant. */
+function targetLabel(t: { alias?: string; model: string; variant?: string }): string {
+  return `${t.alias ? t.alias + "/" : ""}${t.model}${t.variant ? `-${t.variant}` : ""}`;
 }
 
 function cfgWithConfigDir(dir?: string, configDir = getOpenCodeConfigDir()): ManagerConfig {
@@ -82,8 +87,8 @@ export async function handleManagerCommand(
     case "u-accounts": {
       const sub = parts[0];
       if (sub === "add") {
-        const kind = parts[1] as AccountEntry["kind"] | undefined;
-        if (!kind || !KINDS.includes(kind as (typeof KINDS)[number])) {
+        const kind = parts[1] as (typeof KINDS)[number] | undefined;
+        if (!kind || !KINDS.includes(kind)) {
           return { text: "[Manager] Usage: /u-accounts add <openai|antigravity|chatgpt-web> [label]" };
         }
         // Do NOT fake `configured`; the account becomes real only after the actual
@@ -162,7 +167,7 @@ export async function handleManagerCommand(
         `Router: ${cfg.router.enabled ? "enabled" : "disabled"} | orchestrator: ${cfg.router.orchestrator}`,
         ...(["fast", "medium", "heavy"] as const).map(t => {
           const c = cfg.router.tiers[t];
-          return `  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${c.fallback.join(", ") || "-"}`;
+          return `  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${tierTargets(c).map(targetLabel).join(", ") || "-"}`;
         }),
       ];
       return { text: lines.join("\n") };
@@ -171,7 +176,7 @@ export async function handleManagerCommand(
       const cfg = cfgWithConfigDir(dir, configDir);
       const lines = ["Per-tier fallback chains:"];
       for (const t of ["fast", "medium", "heavy"] as const) {
-        lines.push(`  ${t}: ${cfg.router.tiers[t].fallback.join(", ") || "-"}`);
+        lines.push(`  ${t}: ${tierTargets(cfg.router.tiers[t]).map(targetLabel).join(", ") || "-"}`);
       }
       return { text: lines.join("\n") };
     }
@@ -188,7 +193,7 @@ export function summarize(cfg: ManagerConfig, configDir = getOpenCodeConfigDir()
     ...cfg.accounts.map(a => accountLine(a, countRealAccounts(a.kind, configDir))),
     ...(["fast", "medium", "heavy"] as const).map(t => {
       const c = cfg.router.tiers[t];
-      return `  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${c.fallback.join(", ") || "-"}`;
+      return `  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${tierTargets(c).map(targetLabel).join(", ") || "-"}`;
     }),
     `  Wizard: ${next === null ? "complete" : "resume @" + next}`,
   ];

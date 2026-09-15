@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
+// @ts-ignore
 import {
   type AccountMetadataV3,
   type AccountStorageV4,
   mutateAccountStorage,
-} from "@cortexkit/antigravity-auth-core";
+} from "../../vendor/antigravity-auth-core/dist/index.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 
 /**
@@ -22,7 +24,7 @@ export const OPENAI_ACCOUNT_FILE = "openai-auth.json";
 export const OPENAI_STATE_FILE = "openai-auth-state.json";
 export const ANTIGRAVITY_ACCOUNT_FILE = "antigravity-accounts.json";
 
-export type AccountProvider = "openai" | "antigravity";
+export type AccountProvider = "openai" | "antigravity" | "opencode";
 
 /** A sanitized view of one real provider account. Never carries tokens. */
 export interface ProviderAccount {
@@ -322,6 +324,58 @@ function isPermutation(ordered: string[], current: string[]): boolean {
   return seen.size === current.length;
 }
 
+/* ----------------------------- OpenCode Zen ----------------------------- */
+
+/** Whether OpenCode Zen credentials or provider configuration are present. */
+export function isOpencodeConfigured(configDir = getOpenCodeConfigDir()): boolean {
+  const localAuth = join(configDir, "auth.json");
+  if (existsSync(localAuth)) {
+    try {
+      const auth = JSON.parse(readFileSync(localAuth, "utf8"));
+      if (auth && typeof auth === "object" && auth.opencode) return true;
+    } catch {}
+  }
+  if (!process.env.OPENCODE_CONFIG_DIR && configDir === getOpenCodeConfigDir()) {
+    const dataDir = process.env.XDG_DATA_HOME
+      ? join(process.env.XDG_DATA_HOME, "opencode")
+      : join(homedir(), ".local", "share", "opencode");
+    const globalAuth = join(dataDir, "auth.json");
+    if (existsSync(globalAuth)) {
+      try {
+        const auth = JSON.parse(readFileSync(globalAuth, "utf8"));
+        if (auth && typeof auth === "object" && auth.opencode) return true;
+      } catch {}
+    }
+  }
+  for (const f of ["opencode.jsonc", "opencode.json"]) {
+    const p = join(configDir, f);
+    if (existsSync(p)) {
+      try {
+        const text = readFileSync(p, "utf8");
+        if (text.includes('"opencode"') || text.includes("'opencode'")) return true;
+      } catch {}
+    }
+  }
+  return false;
+}
+
+export function getOpenCodeZenAccounts(configDir = getOpenCodeConfigDir()): ProviderAccount[] {
+  const configured = isOpencodeConfigured(configDir);
+  return [
+    {
+      provider: "opencode",
+      id: "opencode-zen",
+      label: "OpenCode Zen",
+      email: undefined,
+      enabled: true,
+      disabled: false,
+      expired: false,
+      configured,
+      main: true,
+    },
+  ];
+}
+
 /* ------------------------------ Unified API ----------------------------- */
 
 /** Sanitized account enumeration across both providers (separate main + fallbacks). */
@@ -413,7 +467,7 @@ export async function reorderOpenAIAccounts(configDir: string, orderedIds: strin
  * Real login actions. `command`/`arguments` are OpenCode native slash-command
  * surface; `cli` is the verified terminal binary argv for exec.
  */
-export function loginActionFor(provider: "openai" | "antigravity" | "chatgpt-web", label?: string): NativeAction {
+export function loginActionFor(provider: "openai" | "antigravity" | "chatgpt-web" | "opencode", label?: string): NativeAction {
   const labelArg = label ? ` --label ${JSON.stringify(label)}` : "";
   if (provider === "openai") {
     return {
@@ -433,6 +487,16 @@ export function loginActionFor(provider: "openai" | "antigravity" | "chatgpt-web
       arguments: "add-oauth-start",
       cli: { command: "antigravity-auth", args: ["login"] },
       text: "Run native login to add a Google Antigravity account.",
+    };
+  }
+  if (provider === "opencode") {
+    return {
+      provider,
+      kind: "login",
+      command: "/auth",
+      arguments: "login opencode",
+      cli: { command: "opencode", args: ["auth", "login"] },
+      text: "Run native login to authenticate OpenCode Zen.",
     };
   }
   return {

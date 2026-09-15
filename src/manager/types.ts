@@ -1,5 +1,5 @@
 /** Provider backends the manager can wire auth for. */
-export type ProviderKind = "openai" | "antigravity" | "chatgpt-web";
+export type ProviderKind = "openai" | "antigravity" | "chatgpt-web" | "opencode";
 
 /** A user-facing account registration for a provider backend. */
 export interface AccountEntry {
@@ -7,6 +7,8 @@ export interface AccountEntry {
   id: string;
   kind: ProviderKind;
   label: string;
+  /** User-chosen alias used in fallback targets and the right-column display. */
+  alias?: string;
   /** Whether the cortexkit/antigravity account is the active main account. */
   main: boolean;
   /** `true` when the underlying auth has completed (valid credentials present). */
@@ -30,16 +32,33 @@ export interface TierChain {
   targets?: FallbackTarget[];
 }
 
+/**
+ * Unified routing mode for the manager's fallback engine AND per-provider routing.
+ *  - main-first: always retry the primary first, then the rest in order.
+ *  - sticky: stay on the current model; only move forward, never back to primary.
+ *  - fallback-first: prefer secondary models, keep the primary in reserve.
+ *  - round-robin: cycle through the chain in order, wrapping around.
+ *  - balanced: distribute based on quota/health/cooldown — picks the model with
+ *    the fewest recent failures and longest time since last cooldown.
+ */
+export type RouterRoutingMode = "main-first" | "sticky" | "fallback-first" | "round-robin" | "balanced";
+
 export interface RouterSettings {
   orchestrator: string;
+  orchestratorVariant?: string;
+  orchestratorFallbacks?: string[];
   tiers: Record<TierName, TierChain>;
   enabled: boolean;
+  /** General fallback routing mode for the manager-owned engine. */
+  routingMode?: RouterRoutingMode;
 }
 
 export type TierName = "fast" | "medium" | "heavy";
 
-/** Ordered fallback target for a tier chain: model id + optional reasoning variant. */
+/** Ordered fallback target for a tier chain: account alias + model id + optional reasoning variant. */
 export interface FallbackTarget {
+  /** User-chosen account alias (e.g. "work", "personal"); optional for legacy targets. */
+  alias?: string;
   model: string;
   variant?: string;
 }

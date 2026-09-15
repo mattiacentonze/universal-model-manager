@@ -26,6 +26,7 @@ const DEEPSEEK = "iit/deepseek-v4-flash";
 export const DEFAULT_ROUTER: RouterSettings = {
   orchestrator: DEEPSEEK,
   enabled: true,
+  routingMode: "main-first",
   tiers: {
     fast: { ...DEFAULT_CHAIN, model: DEEPSEEK, fallback: [GEMINI] },
     medium: {
@@ -44,8 +45,8 @@ export const DEFAULT_ROUTER: RouterSettings = {
 };
 
 export const DEFAULT_ACCOUNTS: AccountEntry[] = [
-  { id: "openai-main", kind: "openai", label: "OpenAI / ChatGPT", main: true, configured: false },
-  { id: "antigravity-main", kind: "antigravity", label: "Google Antigravity", main: false, configured: false },
+  { id: "openai-main", kind: "openai", label: "OpenAI / ChatGPT", alias: "main", main: true, configured: false },
+  { id: "antigravity-main", kind: "antigravity", label: "Google Antigravity", alias: "main", main: false, configured: false },
 ];
 
 export function emptyConfig(): ManagerConfig {
@@ -67,6 +68,7 @@ function isValidTarget(t: unknown): t is FallbackTarget {
   const o = t as Record<string, unknown>;
   if (!isValidModelId(o.model)) return false;
   if (o.variant !== undefined && typeof o.variant !== "string") return false;
+  if (o.alias !== undefined && typeof o.alias !== "string") return false;
   return true;
 }
 
@@ -108,6 +110,9 @@ function isRouter(v: unknown): v is RouterSettings {
   if (typeof r.orchestrator !== "string") return false;
   if (r.orchestrator !== "" && !isValidModelId(r.orchestrator)) return false;
   if (typeof r.enabled !== "boolean") return false;
+  if (r.routingMode !== undefined && !["main-first", "sticky", "fallback-first", "round-robin", "balanced"].includes(String(r.routingMode))) return false;
+  if (r.orchestratorVariant !== undefined && typeof r.orchestratorVariant !== "string") return false;
+  if (r.orchestratorFallbacks !== undefined && (!Array.isArray(r.orchestratorFallbacks) || r.orchestratorFallbacks.some(f => typeof f !== "string"))) return false;
   const t = r.tiers as Record<string, unknown> | undefined;
   if (typeof t !== "object" || t === null) return false;
   return TIER_NAMES.every(k => isTierChain(t[k]));
@@ -118,8 +123,9 @@ function isAccount(v: unknown): v is AccountEntry {
   const a = v as Record<string, unknown>;
   return (
     typeof a.id === "string" &&
-    ["openai", "antigravity", "chatgpt-web"].includes(String(a.kind)) &&
+    ["openai", "antigravity", "chatgpt-web", "opencode"].includes(String(a.kind)) &&
     typeof a.label === "string" &&
+    (a.alias === undefined || typeof a.alias === "string") &&
     typeof a.main === "boolean" &&
     typeof a.configured === "boolean"
   );
@@ -150,7 +156,7 @@ export function validateConfig(input: unknown): ManagerConfig {
   }
 
   const accounts = Array.isArray(raw.accounts) ? raw.accounts.filter(isAccount).map(a => ({ ...a })) : [];
-  for (const kind of ["openai", "antigravity", "chatgpt-web"] as const) {
+  for (const kind of ["openai", "antigravity", "chatgpt-web", "opencode"] as const) {
     const ofKind = accounts.filter(a => a.kind === kind);
     if (ofKind.length > 0 && !ofKind.some(a => a.main)) ofKind[0].main = true;
   }
@@ -236,7 +242,7 @@ export function migrateConfig(dir = getUniversalAuthDataDir()): ManagerConfig {
 
 /** Canonical ordered fallback targets for a tier chain (legacy `fallback`+`fallbackVariants` merge). */
 export function tierTargets(chain: TierChain): FallbackTarget[] {
-  if (chain.targets?.length) return chain.targets.map(t => ({ model: t.model, variant: t.variant }));
+  if (chain.targets?.length) return chain.targets.map(t => ({ model: t.model, variant: t.variant, alias: t.alias }));
   const map = chain.fallbackVariants ?? {};
   return chain.fallback.map(model => ({ model, variant: map[model] }));
 }
