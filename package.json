@@ -50,7 +50,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/vendor && cp -r vendor dist/vendor && npm run build:tui",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/vendor && cp -r vendor dist/vendor && mkdir -p dist/model-router && cp src/model-router/tiers.json dist/model-router/tiers.json && npm run build:tui",
     "build:tui": "node scripts/build-tui.mjs",
     "typecheck": "tsc --noEmit",
     "checks": "npm run typecheck",
