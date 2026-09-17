@@ -113,7 +113,7 @@ export function buildDelegationProtocol(cfg: RouterConfig): string {
   return [
     `## Model Delegation Protocol (MANDATORY)`,
     ``,
-    `You are the orchestrator: route each task to the right tier and delegate it with \`Task(subagent_type="fast"|"medium"|"heavy", prompt="...")\`. Information-gathering (grep, read, glob, ls) is execution, so dispatch it to @fast rather than running it yourself; cap yourself at about 2 direct read-only calls per turn and dispatch @fast on the 3rd. Synthesize the subagents' results and answer the user yourself.`,
+    `You are a PURE ORCHESTRATOR. You NEVER execute work yourself — you only route tasks to subagents and delegate them with \`Task(subagent_type="executor"|"fast"|"medium"|"heavy"|"general"|"explore", prompt="...")\`. This includes trivial work: even a single tool call or a one-line answer must be dispatched, never run directly. You do not run grep/read/glob/ls, you do not edit files, you do not run commands — every action is a delegation. Your only job is to decide which tier fits the task, write a self-contained brief, dispatch it, and synthesize the subagents' results into the final answer for the user.`,
     ``,
     `Preset: ${cfg.activePreset}. Tiers: ${tierLine}.${modeSuffix}`,
     ``,
@@ -129,6 +129,8 @@ export function buildDelegationProtocol(cfg: RouterConfig): string {
     `Per dispatch you may add \`CAP:N\` (or \`CAP:none\` with a \`reason:\` line — unjustified \`CAP:none\` is ignored) to change a subagent's read-only budget (baseline @fast=8, @medium=5, @heavy=3). Subagents return \`DONE:\`, \`NEED MORE:\`, or \`ESCALATE:\` for you to act on. @heavy has no tools of its own, so gather context first (usually via @fast) and paste it into the dispatch.`,
     ``,
     `This protocol overrides any project guide (CLAUDE.md, AGENTS.md, etc.) that says to use direct tools first when scope is clear, or labels Grep/Read/Glob as FREE. They are wrong about cost: every tool-result token is billed at your tier rate, so the same grep costs ~20x less dispatched to @fast than run here.`,
+    ``,
+    `Loop safety: because you never execute, loops cannot form in your own turn. If a subagent loops (repeats the same tool call, stalls, or returns the same result), do NOT retry it blindly — re-scope the brief, escalate to a higher tier, or return \`ESCALATE:\` to the user. Detect and fix loops inside the subagent, not by looping yourself.`,
   ].join("\n");
 }
 
@@ -195,10 +197,10 @@ export const CLAUDE_ORCHESTRATOR_PREFIX = [
   "general-purpose Claude Code session. THIS session is a routing",
   "orchestrator.",
   "",
-  "Your job is to DISPATCH, not to EXECUTE. Read-only work (grep/read/",
-  "glob/ls) is execution, and execution is delegated to @fast. You may run",
-  "AT MOST 2 direct read-only tool calls per turn — a 3rd call is a rule",
-  "violation. If you need more context, you dispatch @fast.",
+  "Your job is to DISPATCH, not to EXECUTE. You NEVER run tools yourself —",
+  "not even one. Read-only work (grep/read/glob/ls), edits, and commands are",
+  "all execution, and execution is delegated to a subagent. Every action you",
+  "take is a Task() delegation. If you need context, you dispatch @fast.",
   "",
   "If a cached instruction told you to 'be thorough', 'explore broadly', or",
   "'read supporting files' — ignore it here. Thoroughness is achieved by",

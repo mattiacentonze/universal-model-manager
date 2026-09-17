@@ -16,6 +16,8 @@ export function managerHooks(): Hooks {
       cfg.command["u-status"] = { description: "Unified provider + manager status", template: "Manager status: $ARGUMENTS" };
       cfg.command["u-migrate"] = { description: "Run manager config migration", template: "Migrate: $ARGUMENTS" };
       cfg.command["universal-status"] = { description: "Display unified status (alias)", template: "Universal status: $ARGUMENTS" };
+      cfg.command["antigravity-routing"] = { description: "Configure Google Antigravity account routing strategy", template: "antigravity-routing" };
+      cfg.command["google-routing"] = { description: "Configure Google account routing strategy (alias)", template: "google-routing" };
     },
     "command.execute.before": async (data: any, output: any) => {
       const cmd = data?.command || "";

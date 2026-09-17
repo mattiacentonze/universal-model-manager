@@ -470,7 +470,7 @@ describe("TUI wizard + native dispatch", () => {
 
   it("UNIFIED_ROUTING_OPTIONS exposes the 4 unified options with detailed descriptions", () => {
     const values = UNIFIED_ROUTING_OPTIONS.map(o => o.value);
-    expect(values).toEqual(["main-first", "round-robin", "fallback-first", "balanced"]);
+    expect(values).toEqual(["main-first", "round-robin", "fallback-first", "sticky-balanced"]);
     for (const opt of UNIFIED_ROUTING_OPTIONS) {
       expect(opt.title).toBeTruthy();
       expect(opt.description).toBeTruthy();
@@ -482,9 +482,9 @@ describe("TUI wizard + native dispatch", () => {
     openRoutingSelector(h.api as never, "manager");
 
     expect(h.last()?.title).toContain("Model Manager routing mode");
-    const balanced = h.find("balanced");
+    const balanced = h.find("sticky-balanced");
     expect(balanced).toBeTruthy();
-    expect(balanced!.title).toBe("Balanced");
+    expect(balanced!.title).toBe("Sticky Balanced");
 
     // Select balanced -> scope prompt appears
     balanced!.onSelect!();
@@ -508,10 +508,10 @@ describe("TUI wizard + native dispatch", () => {
     expect(h.find("main-first")).toBeTruthy();
     expect(h.find("round-robin")).toBeTruthy();
     expect(h.find("fallback-first")).toBeTruthy();
-    expect(h.find("balanced")).toBeTruthy();
+    expect(h.find("sticky-balanced")).toBeTruthy();
 
     // Selecting an option opens the scope prompt (dialog remains open, not cleared)
-    h.find("balanced")!.onSelect!();
+    h.find("sticky-balanced")!.onSelect!();
     expect(h.last()?.title).toContain("Choose scope");
     expect(h.last()).not.toBeNull();
 
@@ -537,9 +537,9 @@ describe("TUI wizard + native dispatch", () => {
     expect(formatRoutingDisplay("main-first")).toBe("Main first");
     expect(formatRoutingDisplay("round-robin")).toBe("Round robin");
     expect(formatRoutingDisplay("fallback-first")).toBe("Fallback first");
-    expect(formatRoutingDisplay("balanced")).toBe("Balanced");
+    expect(formatRoutingDisplay("balanced")).toBe("Sticky balanced");
     expect(formatRoutingDisplay("sticky")).toBe("Main first");
-    expect(formatRoutingDisplay("least-used")).toBe("Balanced");
+    expect(formatRoutingDisplay("least-used")).toBe("Sticky balanced");
   });
 
   it("gatherSidebarData includes opencodeZen status with big-pickle", () => {

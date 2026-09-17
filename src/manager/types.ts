@@ -41,7 +41,7 @@ export interface TierChain {
  *  - balanced: distribute based on quota/health/cooldown — picks the model with
  *    the fewest recent failures and longest time since last cooldown.
  */
-export type RouterRoutingMode = "main-first" | "sticky" | "fallback-first" | "round-robin" | "balanced";
+export type RouterRoutingMode = "main-first" | "sticky-balanced" | "round-robin" | "fallback-first" | "sticky" | "balanced";
 
 export interface RouterSettings {
   orchestrator: string;

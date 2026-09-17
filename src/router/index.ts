@@ -23,8 +23,8 @@ export function routerProtocol(settings: RouterSettings): string {
   return [
     "## Routing protocol (manager-owned)",
     ...lines,
-    "Dispatch rules: trivial work -> handle directly by the primary (no delegation).",
-    "Otherwise route: @fast for read-only/search, @medium for implementation, @heavy for architecture/debugging.",
+    "Dispatch rules: the primary NEVER executes directly — every task, including trivial ones, is delegated to a subagent.",
+    "Route: @fast for read-only/search, @medium for implementation, @heavy for architecture/debugging.",
     "Do not delegate to the same tier as the current agent (no self-call).",
     "The primary orchestrator (build) owns dispatch and final acceptance.",
   ].join("\n");

@@ -8,7 +8,7 @@ import { loadConfig } from "../manager/store.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { usageTracker } from "../chatgpt-web/usage-tracker.js";
 import { zenUsageTracker, type ZenPacingResult } from "../opencode-zen/usage-tracker.js";
-import { isOpencodeConfigured } from "../manager/provider-accounts.js";
+import { getAntigravityAccounts, getAntigravityActiveFamilies, isOpencodeConfigured } from "../manager/provider-accounts.js";
 import { openRoutingSelector } from "./dialogs.js";
 
 type Api = TuiPluginApi;
@@ -29,7 +29,7 @@ export function formatRoutingDisplay(mode: string): string {
   const m = mode.toLowerCase();
   if (m.includes("round-robin") || m.includes("round robin")) return "Round robin";
   if (m.includes("fallback-first") || m.includes("fallback first")) return "Fallback first";
-  if (m.includes("balanced") || m.includes("least-used") || m.includes("hybrid")) return "Balanced";
+  if (m.includes("balanced") || m.includes("least-used") || m.includes("hybrid")) return "Sticky balanced";
   if (m.includes("sticky")) return "Main first";
   if (m.includes("main-first") || m.includes("main first")) return "Main first";
   return mode;
@@ -277,11 +277,18 @@ export interface AntigravityDisplayPool {
   reset?: string;
 }
 
+export interface AntigravityDisplayFamily {
+  name: string;
+  pools: AntigravityDisplayPool[];
+}
+
 export interface AntigravityDisplayAccount {
   id: string;
   label: string;
   active: boolean;
-  pools: AntigravityDisplayPool[];
+  /** Human label of the family(ies) this account is active for, e.g. "Gemini". */
+  activeFor?: string;
+  families: AntigravityDisplayFamily[];
   health: number;
 }
 
@@ -464,54 +471,71 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   }
 
   const agAccounts: AntigravityDisplayAccount[] = [];
+  // Real Antigravity accounts in store order (index-aligned with the redacted
+  // sidebar state) and a label -> manager-account map to resolve aliases.
+  const realAnti = getAntigravityAccounts(configDir);
+  const activeFamilies = getAntigravityActiveFamilies(configDir);
+  const antiByLabel = new Map(
+    cfg.accounts
+      .filter(x => x.kind === "antigravity")
+      .map(x => [x.label, x])
+  );
   if (Array.isArray(agState?.accounts) && agState.accounts.length > 0) {
     for (const a of agState.accounts) {
       if (a.enabled === false) continue;
-      const pools: AntigravityDisplayPool[] = [];
+      const families: AntigravityDisplayFamily[] = [];
       const gq = a.quota?.gemini;
       const cq = a.quota?.["non-gemini"];
 
-      if (gq?.windows && gq.windows.length > 0) {
-        for (const w of gq.windows) {
+      const buildPools = (q: any): AntigravityDisplayPool[] => {
+        const pools: AntigravityDisplayPool[] = [];
+        if (q?.windows && q.windows.length > 0) {
+          for (const w of q.windows) {
+            pools.push({
+              label: w.window === "weekly" ? "7d" : w.window,
+              usedPct: 100 - clamp(w.remainingPercent ?? 0, 0, 100),
+              reset: formatReset(w.resetAt),
+            });
+          }
+        } else if (q) {
           pools.push({
-            label: `Gm ${w.window === "weekly" ? "7d" : w.window}`,
-            usedPct: 100 - clamp(w.remainingPercent ?? 0, 0, 100),
-            reset: formatReset(w.resetAt),
+            label: "",
+            usedPct: 100 - clamp(q.remainingPercent ?? 0, 0, 100),
+            reset: formatReset(q.resetAt),
           });
         }
-      } else if (gq) {
-        pools.push({
-          label: "Gm",
-          usedPct: 100 - clamp(gq.remainingPercent ?? 0, 0, 100),
-          reset: formatReset(gq.resetAt),
-        });
-      }
+        return pools;
+      };
 
-      if (cq?.windows && cq.windows.length > 0) {
-        for (const w of cq.windows) {
-          pools.push({
-            label: `NG ${w.window === "weekly" ? "7d" : w.window}`,
-            usedPct: 100 - clamp(w.remainingPercent ?? 0, 0, 100),
-            reset: formatReset(w.resetAt),
-          });
-        }
-      } else if (cq) {
-        pools.push({
-          label: "NG",
-          usedPct: 100 - clamp(cq.remainingPercent ?? 0, 0, 100),
-          reset: formatReset(cq.resetAt),
-        });
-      }
+      const geminiPools = buildPools(gq);
+      if (geminiPools.length > 0) families.push({ name: "Gem", pools: geminiPools });
+      const otherPools = buildPools(cq);
+      if (otherPools.length > 0) families.push({ name: "Oth", pools: otherPools });
 
-      const match = cfg.accounts.find(
-        x => (a.current && x.main) || x.label === a.label || x.id === a.id
-      );
+      // The sidebar state is redacted (ordinal `acct-N` ids, no email), so it
+      // cannot be matched by email or real id. Its index aligns with the real
+      // Antigravity store order, so resolve the real account by index, then the
+      // manager alias by the real label. Never assign the main account's alias
+      // to every `current` account (that produced duplicate names).
+      const idx = /^acct-(\d+)$/.exec(a.id)?.[1];
+      const real = idx !== undefined ? realAnti[Number(idx)] : undefined;
+      const mgr = real ? antiByLabel.get(real.label) : undefined;
+      const label = mgr?.alias || real?.label || a.label || a.id;
+
+      // Which family(ies) this account is the active one for, from the real
+      // store's per-family active indices (index-aligned with the sidebar).
+      const numIdx = idx !== undefined ? Number(idx) : -1;
+      const activeFor = [
+        activeFamilies.gemini === numIdx ? "gem" : null,
+        activeFamilies.claude === numIdx ? "o" : null,
+      ].filter((f): f is string => !!f).join(", ");
 
       agAccounts.push({
         id: a.id,
-        label: match?.alias || a.label || a.id,
+        label,
         active: Boolean(a.current),
-        pools,
+        activeFor: activeFor || undefined,
+        families,
         health: Math.round(clamp(a.health ?? 100, 0, 100)),
       });
     }
@@ -586,24 +610,20 @@ function getAntigravitySummary(data: UnifiedSidebarData): { name: string; text: 
   const active = data.antigravity.accounts.find(a => a.active) ?? data.antigravity.accounts[0];
   if (!active) return { name: "Account 1", text: "\u2014", tone: "muted" };
 
-  const gmPools = active.pools.filter(p => p.label.startsWith("Gm"));
-  const ngPools = active.pools.filter(p => p.label.startsWith("NG"));
-
-  const worstGm = gmPools.reduce<AntigravityDisplayPool | null>(
-    (best, p) => (best === null || p.usedPct > best.usedPct ? p : best),
-    null
-  );
-  const worstNg = ngPools.reduce<AntigravityDisplayPool | null>(
-    (best, p) => (best === null || p.usedPct > best.usedPct ? p : best),
-    null
-  );
-
   const parts: string[] = [];
-  if (worstGm) parts.push(`${worstGm.label}: ${Math.round(worstGm.usedPct)}%`);
-  if (worstNg) parts.push(`${worstNg.label}: ${Math.round(worstNg.usedPct)}%`);
+  let maxPct = 0;
+  for (const fam of active.families) {
+    const worst = fam.pools.reduce<AntigravityDisplayPool | null>(
+      (best, p) => (best === null || p.usedPct > best.usedPct ? p : best),
+      null
+    );
+    if (worst) {
+      parts.push(`${fam.name}: ${Math.round(worst.usedPct)}%`);
+      maxPct = Math.max(maxPct, worst.usedPct);
+    }
+  }
 
   const text = parts.length > 0 ? parts.join(" \u00b7 ") : "\u2014";
-  const maxPct = Math.max(...active.pools.map(p => p.usedPct), 0);
   const tone = maxPct >= 80 ? "err" : maxPct >= 50 ? "warn" : "ok";
   return { name: active.label, text, tone };
 }
@@ -921,7 +941,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
             </box>
           </Show>
 
-          {/* Expanded view: full accounts, Gm/NG bars, health, routing */}
+          {/* Expanded view: full accounts, Gemini/Other bars, health, routing */}
           <Show when={!antigravityCollapsed()}>
             {/* Accounts start directly (NO "Quota" header) */}
             <For each={data().antigravity.accounts}>
@@ -932,39 +952,44 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                       <b>{acct.label}</b>
                     </text>
                     <text fg={toneColor(theme(), acct.active ? "ok" : "muted")}>
-                      <b>{acct.active ? "active" : "idle"}</b>
+                      <b>{acct.active ? `active: ${acct.activeFor || "?"}` : "idle"}</b>
                     </text>
                   </box>
 
-                  <For each={acct.pools}>
-                    {p => {
-                      const segments = quotaBarSegments(p.usedPct, 10);
-                      const poolTone = p.usedPct >= 80 ? "err" : p.usedPct >= 50 ? "warn" : "ok";
-                      return (
-                        <box width="100%" flexDirection="column">
-                          <box width="100%" flexDirection="row" justifyContent="space-between">
-                            <box flexDirection="row">
-                              <text width={6} flexShrink={0} fg={theme().textMuted ?? "#888888"}>
-                                {p.label.padEnd(6)}
-                              </text>
-                              <For each={segments}>
-                                {seg => (
-                                  <text fg={toneColor(theme(), seg.tone)}>
-                                    {seg.text}
-                                  </text>
-                                )}
-                              </For>
-                              <text fg={toneColor(theme(), poolTone)}>
-                                {` ${String(Math.round(p.usedPct)).padStart(3)}%`}
-                              </text>
+                  <For each={acct.families}>
+                    {(fam) => (
+                      <For each={fam.pools}>
+                        {p => {
+                          const segments = quotaBarSegments(p.usedPct, 10);
+                          const poolTone = p.usedPct >= 80 ? "err" : p.usedPct >= 50 ? "warn" : "ok";
+                          return (
+                            <box width="100%" flexDirection="row" justifyContent="space-between">
+                              <box flexDirection="row">
+                                <text fg="#4285F4">
+                                  <b>{fam.name}</b>
+                                </text>
+                                <text width={4} flexShrink={0} fg={theme().textMuted ?? "#888888"}>
+                                  {` ${p.label.padEnd(3)}`}
+                                </text>
+                                <For each={segments}>
+                                  {seg => (
+                                    <text fg={toneColor(theme(), seg.tone)}>
+                                      {seg.text}
+                                    </text>
+                                  )}
+                                </For>
+                                <text fg={toneColor(theme(), poolTone)}>
+                                  {` ${String(Math.round(p.usedPct)).padStart(3)}%`}
+                                </text>
+                              </box>
+                              <Show when={p.reset}>
+                                <text fg={theme().textMuted ?? "#888888"}>{p.reset}</text>
+                              </Show>
                             </box>
-                            <Show when={p.reset}>
-                              <text fg={theme().textMuted ?? "#888888"}>{p.reset}</text>
-                            </Show>
-                          </box>
-                        </box>
-                      );
-                    }}
+                          );
+                        }}
+                      </For>
+                    )}
                   </For>
 
                   <box width="100%" flexDirection="column">

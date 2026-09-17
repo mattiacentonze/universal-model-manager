@@ -2036,6 +2036,47 @@ var AccountManager = class {
       }
       return next2;
     }
+    if (strategy === "main-first") {
+      const mainIndex = this.currentAccountIndexByFamily[family] >= 0 ? this.currentAccountIndexByFamily[family] : 0;
+      const main = (mainIndex >= 0 && mainIndex < this.accounts.length) ? this.accounts[mainIndex] : null;
+      if (main && main.enabled !== false && !excludeIndexes?.has(main.index)) {
+        clearExpiredRateLimits(main, this.now);
+        const isLimited = isRateLimitedForHeaderStyle(main, family, headerStyle, this.now, model);
+        const isOverThreshold = isOverSoftQuotaThreshold(main, family, effectiveSoftQuotaThreshold, softQuotaCacheTtlMs, this.now, model);
+        if (!isLimited && !isOverThreshold && !this.isAccountCoolingDown(main)) {
+          this.markTouchedForQuota(main, quotaKey);
+          this.setActiveIndex(family, main.index, identity);
+          return main;
+        }
+      }
+      const next = this.getNextForFamily(family, model, headerStyle, effectiveSoftQuotaThreshold, softQuotaCacheTtlMs, identity, excludeIndexes);
+      if (next) {
+        this.markTouchedForQuota(next, quotaKey);
+        this.setActiveIndex(family, next.index, identity);
+      }
+      return next;
+    }
+    if (strategy === "fallback-first") {
+      const mainIndex = this.currentAccountIndexByFamily[family] >= 0 ? this.currentAccountIndexByFamily[family] : 0;
+      const fallbacks = this.accounts.filter((a) => a.enabled !== false && a.index !== mainIndex && !excludeIndexes?.has(a.index));
+      for (const fb of fallbacks) {
+        clearExpiredRateLimits(fb, this.now);
+        const isLimited = isRateLimitedForHeaderStyle(fb, family, headerStyle, this.now, model);
+        const isOverThreshold = isOverSoftQuotaThreshold(fb, family, effectiveSoftQuotaThreshold, softQuotaCacheTtlMs, this.now, model);
+        if (!isLimited && !isOverThreshold && !this.isAccountCoolingDown(fb)) {
+          this.markTouchedForQuota(fb, quotaKey);
+          this.setActiveIndex(family, fb.index, identity);
+          return fb;
+        }
+      }
+      const main = (mainIndex >= 0 && mainIndex < this.accounts.length) ? this.accounts[mainIndex] : null;
+      if (main && main.enabled !== false && !excludeIndexes?.has(main.index)) {
+        clearExpiredRateLimits(main, this.now);
+        this.markTouchedForQuota(main, quotaKey);
+        this.setActiveIndex(family, main.index, identity);
+        return main;
+      }
+    }
     if (strategy === "hybrid") {
       const healthTracker = getHealthTracker();
       const tokenTracker = getTokenTracker();
@@ -13138,10 +13179,12 @@ async function buildDialogPayload(command, argumentsText, context) {
     case "antigravity-routing": {
       const settings = context.settings.get();
       const parsed = parseToggleArguments(argumentsText);
+      const currentMode = settings.account_selection_strategy || "main-first";
       return {
         command,
-        text: "Antigravity routing",
+        text: `Google routing (${currentMode})`,
         knobs: {
+          mode: currentMode,
           cli_first: parsed.cli_first ?? settings.routing.cli_first,
           quota_style_fallback: parsed.quota_style_fallback ?? settings.routing.quota_style_fallback,
           timeoutMs: 2e3
@@ -13425,6 +13468,37 @@ ${result.url}`,
       };
     }
     case "antigravity-routing": {
+      const rawArg = (request.arguments || "").trim().toLowerCase();
+      if (["main-first", "fallback-first", "sticky-balanced", "round-robin"].includes(rawArg)) {
+        try {
+          const configPath = getUserConfigPath();
+          let cfg = {};
+          if (existsSync8(configPath)) {
+            try { cfg = JSON.parse(readFileSync11(configPath, "utf-8")); } catch {}
+          }
+          cfg.account_selection_strategy = rawArg;
+          delete cfg.routing_mode;
+          if (rawArg === "main-first") {
+            cfg.scheduling_mode = "cache_first";
+            cfg.switch_on_first_rate_limit = false;
+          } else if (rawArg === "sticky-balanced") {
+            cfg.scheduling_mode = "balance";
+            cfg.switch_on_first_rate_limit = true;
+          } else if (rawArg === "round-robin") {
+            cfg.scheduling_mode = "performance_first";
+            cfg.switch_on_first_rate_limit = true;
+          } else if (rawArg === "fallback-first") {
+            cfg.scheduling_mode = "balance";
+            cfg.switch_on_first_rate_limit = true;
+          }
+          await writeJsonAtomic(configPath, cfg);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          log12.warn("routing update failed", { error: message });
+          return { text: `Routing update failed: ${message}`, knobs: { timeoutMs: 2e3, error: true } };
+        }
+        return { text: `Google routing set to ${rawArg}`, knobs: { mode: rawArg, timeoutMs: 2e3 } };
+      }
       const parsed = parseToggleArguments(request.arguments);
       try {
         await context.settings.update((draft) => {
@@ -13578,7 +13652,13 @@ function createCommandExecuteBefore(client, settings, pushNotification2, command
     settings,
     commandData
   };
-  return async (input2) => {
+  return async (input2, output) => {
+    if (input2.command === "google-routing") {
+      input2.command = "antigravity-routing";
+    }
+    if (input2.command === "google-quota") {
+      input2.command = "antigravity-quota";
+    }
     const command = input2.command;
     if (command === GEMINI_DUMP_COMMAND_NAME) {
       const action = parseGeminiDumpCommandAction(input2.arguments);
@@ -13595,6 +13675,36 @@ function createCommandExecuteBefore(client, settings, pushNotification2, command
       throwHandledCommandSentinel();
     }
     if (command !== ANTIGRAVITY_QUOTA_COMMAND_NAME && command !== ANTIGRAVITY_ACCOUNT_COMMAND_NAME && command !== ANTIGRAVITY_ROUTING_COMMAND_NAME && command !== ANTIGRAVITY_KILLSWITCH_COMMAND_NAME && command !== ANTIGRAVITY_DUMP_COMMAND_NAME && command !== ANTIGRAVITY_LOGGING_COMMAND_NAME) {
+      return;
+    }
+    if (command === "antigravity-routing" || command === "google-routing") {
+      if (input2.arguments && input2.arguments.trim()) {
+        try {
+          const result = await applyCommand({
+            command: "antigravity-routing",
+            arguments: input2.arguments.trim(),
+            sessionId: input2.sessionID
+          }, context);
+          if (output && output.parts) {
+            output.parts.push({ type: "text", text: result.text });
+          } else if (!connectionState.isTuiConnected(input2.sessionID)) {
+            await sendIgnoredMessage(client, input2.sessionID, result.text);
+          }
+        } catch (err) {
+          log12.warn("Error applying command", { error: String(err) });
+        }
+        return;
+      }
+      const payload = await buildDialogPayload(command, input2.arguments, {
+        ...context,
+        sessionID: input2.sessionID
+      });
+      pushNotification2(payload, input2.sessionID);
+      if (output && output.parts) {
+        output.parts.push({ type: "text", text: payload.text });
+      } else if (!connectionState.isTuiConnected(input2.sessionID)) {
+        await sendIgnoredMessage(client, input2.sessionID, payload.text);
+      }
       return;
     }
     const payload = await buildDialogPayload(command, input2.arguments, {
@@ -13630,8 +13740,24 @@ var COMMAND_DESCRIPTIONS = {
   "antigravity-logging": "Adjust the runtime logging level."
 };
 function registerAntigravityCommands(config) {
-  // Intentionally a no-op: the /antigravity-* and /gemini-dump commands are
-  // not registered so they no longer appear in the OpenCode command palette.
+  if (!config) return;
+  config.command = config.command || {};
+  const commands = [
+    { name: "antigravity-routing", desc: "Configure Google Antigravity account routing strategy" },
+    { name: "antigravity-quota", desc: "Refresh Google Antigravity quota" },
+    { name: "antigravity-account", desc: "Manage Google Antigravity accounts" },
+    { name: "antigravity-killswitch", desc: "Manage Google Antigravity killswitch" },
+    { name: "antigravity-dump", desc: "Manage Google Antigravity diagnostic dumps" },
+    { name: "antigravity-logging", desc: "Configure Google Antigravity logging level" },
+    { name: "google-routing", desc: "Configure Google account routing strategy (alias)" },
+    { name: "google-quota", desc: "Refresh Google quota (alias)" },
+  ];
+  for (const cmd of commands) {
+    config.command[cmd.name] = {
+      description: cmd.desc,
+      template: cmd.name,
+    };
+  }
 }
 
 // src/plugin/command-data.ts
@@ -14011,7 +14137,9 @@ import { z as z4 } from "zod";
 var AccountSelectionStrategySchema = z4.enum([
   "sticky",
   "round-robin",
-  "hybrid"
+  "hybrid",
+  "main-first",
+  "fallback-first"
 ]);
 var ToastScopeSchema = z4.enum(["root_only", "all"]);
 var SchedulingModeSchema = z4.enum([
@@ -14247,6 +14375,7 @@ var AntigravityConfigSchema = z4.object({
    * @default false
    */
   cli_first: z4.boolean().default(false),
+  routing_mode: z4.enum(["main-first", "sticky-balanced", "round-robin", "fallback-first"]).default("main-first"),
   /**
    * Strategy for selecting accounts when making requests.
    * Env override: OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY
@@ -14543,10 +14672,38 @@ function getConfigDir4() {
   return join14(xdgConfig2, "opencode");
 }
 function getUserConfigPath() {
-  return join14(getConfigDir4(), "antigravity.json");
+  const dir = getConfigDir4();
+  const googlePath = join14(dir, "google.json");
+  if (existsSync8(googlePath)) return googlePath;
+  return join14(dir, "antigravity.json");
 }
 function getProjectConfigPath(directory) {
   return join14(directory, ".opencode", "antigravity.json");
+}
+function deriveRoutingDefaults(cfg) {
+  if (!cfg || typeof cfg !== "object") return cfg;
+  const rm = cfg.routing_mode || "main-first";
+  cfg.routing_mode = rm;
+  if (!cfg.account_selection_strategy) {
+    if (rm === "main-first") {
+      cfg.account_selection_strategy = "main-first";
+      cfg.scheduling_mode = cfg.scheduling_mode || "cache_first";
+      cfg.switch_on_first_rate_limit = cfg.switch_on_first_rate_limit ?? false;
+    } else if (rm === "sticky-balanced") {
+      cfg.account_selection_strategy = "hybrid";
+      cfg.scheduling_mode = cfg.scheduling_mode || "balance";
+      cfg.switch_on_first_rate_limit = cfg.switch_on_first_rate_limit ?? true;
+    } else if (rm === "round-robin") {
+      cfg.account_selection_strategy = "round-robin";
+      cfg.scheduling_mode = cfg.scheduling_mode || "performance_first";
+      cfg.switch_on_first_rate_limit = cfg.switch_on_first_rate_limit ?? true;
+    } else if (rm === "fallback-first") {
+      cfg.account_selection_strategy = "fallback-first";
+      cfg.scheduling_mode = cfg.scheduling_mode || "balance";
+      cfg.switch_on_first_rate_limit = cfg.switch_on_first_rate_limit ?? true;
+    }
+  }
+  return cfg;
 }
 function loadConfigFile(path5) {
   try {
@@ -14554,7 +14711,7 @@ function loadConfigFile(path5) {
       return null;
     }
     const content = readFileSync11(path5, "utf-8");
-    const rawConfig = JSON.parse(content);
+    const rawConfig = deriveRoutingDefaults(JSON.parse(content));
     const result = AntigravityConfigSchema.partial().safeParse(rawConfig);
     if (!result.success) {
       log12.warn("Config validation error", {

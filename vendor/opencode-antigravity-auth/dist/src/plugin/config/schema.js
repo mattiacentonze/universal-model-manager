@@ -20,6 +20,8 @@ export const AccountSelectionStrategySchema = z.enum([
     'sticky',
     'round-robin',
     'hybrid',
+    'main-first',
+    'fallback-first',
 ]);
 /**
  * Toast notification scope for controlling which sessions show toasts.
@@ -279,6 +281,7 @@ export const AntigravityConfigSchema = z.object({
      * @default false
      */
     cli_first: z.boolean().default(false),
+    routing_mode: z.enum(["main-first", "sticky-balanced", "round-robin", "fallback-first"]).default("main-first"),
     /**
      * Strategy for selecting accounts when making requests.
      * Env override: OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY

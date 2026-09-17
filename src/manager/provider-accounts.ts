@@ -76,7 +76,7 @@ export function accountIdFor(provider: AccountProvider, key: string): string {
   return `${provider}-${(h >>> 0).toString(36)}`;
 }
 
-type RoutingMode = "main-first" | "fallback-first" | "sticky-balanced";
+type RoutingMode = "main-first" | "sticky-balanced" | "round-robin" | "fallback-first";
 
 /* ------------------------------- OpenAI --------------------------------- */
 
@@ -192,9 +192,11 @@ export function getOpenAIAccounts(configDir = getOpenCodeConfigDir()): ProviderA
  * the native `/openai-routing` command. It is exposed as a native action; the
  * primary itself is never swapped from this adapter (host auth holds its creds).
  */
-export function routingModeAction(mode: RoutingMode): NativeAction {
-  const action = loginActionFor("openai");
-  return { ...action, kind: "set-routing", arguments: mode, cli: { command: "", args: [] }, text: `Set OpenAI routing to ${mode}.` };
+export function routingModeAction(mode: RoutingMode, provider: "openai" | "antigravity" = "openai"): NativeAction {
+  const action = loginActionFor(provider);
+  const cmd = provider === "antigravity" ? "/antigravity-routing" : "/openai-routing";
+  const name = provider === "antigravity" ? "Google Antigravity" : "OpenAI";
+  return { ...action, kind: "set-routing", command: cmd, arguments: mode, cli: { command: "", args: [] }, text: `Set ${name} routing to ${mode}.` };
 }
 
 /* ----------------------------- Antigravity ------------------------------ */
@@ -231,6 +233,29 @@ export function getAntigravityAccounts(configDir = getOpenCodeConfigDir()): Prov
     configured: typeof meta.refreshToken === "string" && meta.refreshToken.length > 0,
     main: Number.isInteger(active) && active >= 0 && active < store.accounts.length && idx === active,
   }));
+}
+
+/** Which model family each real Antigravity account index is active for. */
+export interface AntigravityActiveFamilies {
+  claude?: number;
+  gemini?: number;
+}
+
+/**
+ * Read the real store's per-family active indices. The sidebar uses this to
+ * label an account as active for Gemini vs. non-Gemini (Claude/GPT-oss) instead
+ * of a generic "active" tag. Returns an empty object when unreadable.
+ */
+export function getAntigravityActiveFamilies(configDir = getOpenCodeConfigDir()): AntigravityActiveFamilies {
+  const path = join(configDir, ANTIGRAVITY_ACCOUNT_FILE);
+  if (!existsSync(path)) return {};
+  try {
+    const store = readAntigravity(path);
+    if (!store) return {};
+    return store.activeIndexByFamily ?? {};
+  } catch {
+    return {};
+  }
 }
 
 function readAntigravity(path: string): AccountStorageV4 | null {

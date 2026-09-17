@@ -110,7 +110,7 @@ function isRouter(v: unknown): v is RouterSettings {
   if (typeof r.orchestrator !== "string") return false;
   if (r.orchestrator !== "" && !isValidModelId(r.orchestrator)) return false;
   if (typeof r.enabled !== "boolean") return false;
-  if (r.routingMode !== undefined && !["main-first", "sticky", "fallback-first", "round-robin", "balanced"].includes(String(r.routingMode))) return false;
+  if (r.routingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.routingMode))) return false;
   if (r.orchestratorVariant !== undefined && typeof r.orchestratorVariant !== "string") return false;
   if (r.orchestratorFallbacks !== undefined && (!Array.isArray(r.orchestratorFallbacks) || r.orchestratorFallbacks.some(f => typeof f !== "string"))) return false;
   const t = r.tiers as Record<string, unknown> | undefined;

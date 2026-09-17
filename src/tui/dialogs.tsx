@@ -157,7 +157,7 @@ function accountsWizard(api: Api) {
  *  - Antigravity main is written to the real store AND the runtime "current"
  *    command is dispatched via native so the live AccountManager stays in sync.
  */
-export type UnifiedRoutingMode = "main-first" | "round-robin" | "fallback-first" | "balanced";
+export type UnifiedRoutingMode = "main-first" | "sticky-balanced" | "round-robin" | "fallback-first";
 
 export const UNIFIED_ROUTING_OPTIONS: Array<{
   title: string;
@@ -180,9 +180,9 @@ export const UNIFIED_ROUTING_OPTIONS: Array<{
     description: "Use secondary models/accounts first, keeping the primary in reserve.",
   },
   {
-    title: "Balanced",
-    value: "balanced",
-    description: "Distribute dynamically based on quota, health score, and cooldown recovery.",
+    title: "Sticky Balanced",
+    value: "sticky-balanced",
+    description: "Pins session to account with most capacity / least usage (LiteLLM session affinity)",
   },
 ];
 
@@ -263,7 +263,7 @@ export function getOpenAIRoutingMode(): string {
 }
 
 export function setOpenAIRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
-  const nativeMode = mode === "balanced" ? "sticky-balanced" : mode;
+  const nativeMode = mode === ("balanced" as any) ? "sticky-balanced" : mode;
   if (scope === "all") {
     try {
       const p = join(configDir(), "openai-auth.json");
@@ -276,36 +276,57 @@ export function setOpenAIRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: 
       return;
     }
   }
-  void dispatchNative(api, { ...routingModeAction(nativeMode as any), command: "/openai-routing" });
+  void dispatchNative(api, { ...routingModeAction(nativeMode as any, "openai"), command: "/openai-routing", arguments: nativeMode });
   api.ui.toast({
     variant: "success",
     title: "OpenAI routing",
-    message: `OpenAI routing set to ${mode} (${scope === "session" ? "current session" : "all sessions"}).`,
+    message: `OpenAI routing set to ${nativeMode} (${scope === "session" ? "current session" : "all sessions"}).`,
   });
 }
 
-export function getGoogleRoutingMode(): string {
+export function getGoogleRoutingMode(): UnifiedRoutingMode {
   try {
-    const p = join(configDir(), "antigravity.json");
+    const dir = configDir();
+    const p = join(dir, "google.json");
     if (existsSync(p)) {
       const data = JSON.parse(readFileSync(p, "utf8"));
-      return data?.account_selection_strategy || "sticky";
+      const m = data?.account_selection_strategy;
+      if (m === "hybrid" || m === "sticky-balanced" || m === "balanced") return "sticky-balanced";
+      if (m === "sticky" || m === "main-first") return "main-first";
+      if (m === "round-robin") return "round-robin";
+      if (m === "fallback-first") return "fallback-first";
+      return "main-first";
     }
   } catch {}
-  return "sticky";
+  return "main-first";
 }
 
 export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
-  const strategy = mode === "main-first" ? "sticky" : mode === "round-robin" ? "round-robin" : "least-used";
+  const nativeMode = mode === ("balanced" as any) ? "sticky-balanced" : mode;
   if (scope === "all") {
     try {
-      const p = join(configDir(), "antigravity.json");
+      const dir = configDir();
+      const p = join(dir, "google.json");
       let data: any = {};
       if (existsSync(p)) data = JSON.parse(readFileSync(p, "utf8"));
-      data.account_selection_strategy = strategy;
+      data.account_selection_strategy = nativeMode;
+      delete data.routing_mode;
+      if (nativeMode === "main-first") {
+        data.scheduling_mode = "cache_first";
+        data.switch_on_first_rate_limit = false;
+      } else if (nativeMode === "fallback-first") {
+        data.scheduling_mode = "balance";
+        data.switch_on_first_rate_limit = true;
+      } else if (nativeMode === "sticky-balanced") {
+        data.scheduling_mode = "balance";
+        data.switch_on_first_rate_limit = true;
+      } else if (nativeMode === "round-robin") {
+        data.scheduling_mode = "performance_first";
+        data.switch_on_first_rate_limit = true;
+      }
       writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
     } catch {
-      api.ui.toast({ variant: "error", title: "Error", message: "Failed to update antigravity.json" });
+      api.ui.toast({ variant: "error", title: "Error", message: "Failed to update google.json" });
       return;
     }
   }
@@ -313,14 +334,14 @@ export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: 
     provider: "antigravity",
     kind: "set-routing",
     command: "/antigravity-routing",
-    arguments: strategy,
+    arguments: nativeMode,
     cli: { command: "", args: [] },
-    text: `Set Google routing strategy to ${strategy}`,
+    text: `Set Google routing to ${nativeMode}`,
   });
   api.ui.toast({
     variant: "success",
     title: "Google routing",
-    message: `Google routing strategy set to ${mode} (${scope === "session" ? "current session" : "all sessions"}).`,
+    message: `Google routing set to ${nativeMode} (${scope === "session" ? "current session" : "all sessions"}).`,
   });
 }
 
@@ -333,18 +354,19 @@ export function setOpenCodeZenRoutingMode(api: Api, mode: UnifiedRoutingMode, sc
 }
 
 export function setRouterRoutingMode(api: Api, mode: RouterRoutingMode, scope: "session" | "all" = "all") {
+  const unified: UnifiedRoutingMode = (mode === "sticky" ? "main-first" : mode === "balanced" ? "sticky-balanced" : mode) as UnifiedRoutingMode;
   if (scope === "all") {
     const c = cfg();
-    c.router.routingMode = mode;
+    c.router.routingMode = unified;
     saveConfig(c);
   }
-  const unified = (mode === "sticky" ? "main-first" : mode) as UnifiedRoutingMode;
   try { setOpenAIRoutingMode(api, unified, scope); } catch {}
   try { setGoogleRoutingMode(api, unified, scope); } catch {}
+  try { setOpenCodeZenRoutingMode(api, unified, scope); } catch {}
   api.ui.toast({
     variant: "success",
     title: "Model Manager routing",
-    message: `Routing mode set to ${mode} (${scope === "session" ? "current session" : "all sessions"}). ${scope === "all" ? RESTART : ""}`.trim(),
+    message: `Routing mode set to ${unified} (${scope === "session" ? "current session" : "all sessions"}). ${scope === "all" ? RESTART : ""}`.trim(),
   });
 }
 

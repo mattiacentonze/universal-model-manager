@@ -6,6 +6,7 @@ import { opencodeZenServerPlugin } from "./opencode-zen/index.js";
 import ModelRouterPlugin from "./model-router/index.js";
 import { composeHooks } from "./hooks/compose.js";
 import { managerHooks } from "./manager/hooks.js";
+import { createQuotaPoller } from "./manager/quota-poller.js";
 
 import { PLUGIN_ID, PLUGIN_ALIASES } from "./shared/constants.js";
 
@@ -23,9 +24,15 @@ export const universalModelManagerPlugin: Plugin = async (input, options) => {
 
   const managerServerHooks = managerHooks();
 
+  const quotaPoller = createQuotaPoller(input.directory);
+  const quotaHooks = {
+    event: quotaPoller.eventHandler,
+    dispose: quotaPoller.dispose,
+  };
+
   // The model-router populates the tier agents FIRST so the runtime fallback
   // config hook (composed after) captures the per-agent fallback chains.
-  return composeHooks(routingHooks, openaiHooks, webHooks, fallbackHooks, zenHooks, managerServerHooks);
+  return composeHooks(routingHooks, openaiHooks, webHooks, fallbackHooks, zenHooks, managerServerHooks, quotaHooks);
 };
 
 const plugin: PluginModule & { id: string } = { id: PLUGIN_ID, server: universalModelManagerPlugin };

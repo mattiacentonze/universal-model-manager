@@ -509,6 +509,47 @@ export class AccountManager {
             }
             return next;
         }
+        if (strategy === 'main-first') {
+            const mainIndex = this.currentAccountIndexByFamily[family] >= 0 ? this.currentAccountIndexByFamily[family] : 0;
+            const main = (mainIndex >= 0 && mainIndex < this.accounts.length) ? this.accounts[mainIndex] : null;
+            if (main && main.enabled !== false && !excludeIndexes?.has(main.index)) {
+                clearExpiredRateLimits(main, this.now);
+                const isLimited = isRateLimitedForHeaderStyle(main, family, headerStyle, this.now, model);
+                const isOverThreshold = isOverSoftQuotaThreshold(main, family, effectiveSoftQuotaThreshold, softQuotaCacheTtlMs, this.now, model);
+                if (!isLimited && !isOverThreshold && !this.isAccountCoolingDown(main)) {
+                    this.markTouchedForQuota(main, quotaKey);
+                    this.setActiveIndex(family, main.index, identity);
+                    return main;
+                }
+            }
+            const next = this.getNextForFamily(family, model, headerStyle, effectiveSoftQuotaThreshold, softQuotaCacheTtlMs, identity, excludeIndexes);
+            if (next) {
+                this.markTouchedForQuota(next, quotaKey);
+                this.setActiveIndex(family, next.index, identity);
+            }
+            return next;
+        }
+        if (strategy === 'fallback-first') {
+            const mainIndex = this.currentAccountIndexByFamily[family] >= 0 ? this.currentAccountIndexByFamily[family] : 0;
+            const fallbacks = this.accounts.filter((a) => a.enabled !== false && a.index !== mainIndex && !excludeIndexes?.has(a.index));
+            for (const fb of fallbacks) {
+                clearExpiredRateLimits(fb, this.now);
+                const isLimited = isRateLimitedForHeaderStyle(fb, family, headerStyle, this.now, model);
+                const isOverThreshold = isOverSoftQuotaThreshold(fb, family, effectiveSoftQuotaThreshold, softQuotaCacheTtlMs, this.now, model);
+                if (!isLimited && !isOverThreshold && !this.isAccountCoolingDown(fb)) {
+                    this.markTouchedForQuota(fb, quotaKey);
+                    this.setActiveIndex(family, fb.index, identity);
+                    return fb;
+                }
+            }
+            const main = (mainIndex >= 0 && mainIndex < this.accounts.length) ? this.accounts[mainIndex] : null;
+            if (main && main.enabled !== false && !excludeIndexes?.has(main.index)) {
+                clearExpiredRateLimits(main, this.now);
+                this.markTouchedForQuota(main, quotaKey);
+                this.setActiveIndex(family, main.index, identity);
+                return main;
+            }
+        }
         if (strategy === 'hybrid') {
             const healthTracker = getHealthTracker();
             const tokenTracker = getTokenTracker();

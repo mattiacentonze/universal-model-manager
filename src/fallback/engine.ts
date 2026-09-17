@@ -159,7 +159,7 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
     return undefined;
   };
   const start = state.fallbackIndex + 1;
-  if (routingMode === "balanced") {
+  if (routingMode === "balanced" || routingMode === "sticky-balanced") {
     // Balanced mode: pick the healthiest available candidate not in cooldown.
     // Prefers models that haven't failed yet in this session; among failed models,
     // prefers the one whose failure was furthest in the past (most recovery time).
