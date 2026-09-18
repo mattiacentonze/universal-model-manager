@@ -324,6 +324,7 @@ export interface UnifiedSidebarData {
   antigravity: {
     accounts: AntigravityDisplayAccount[];
     routeSummary: string;
+    routingMode: string;
   };
   opencodeZen: OpenCodeZenDisplayData;
 }
@@ -528,12 +529,14 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
       const activeFor = [
         activeFamilies.gemini === numIdx ? "gem" : null,
         activeFamilies.claude === numIdx ? "o" : null,
-      ].filter((f): f is string => !!f).join(", ");
+      ].filter((f): f is string => Boolean(f)).join(", ");
+
+      const isActive = Boolean(activeFor);
 
       agAccounts.push({
         id: a.id,
         label,
-        active: Boolean(a.current),
+        active: isActive,
         activeFor: activeFor || undefined,
         families,
         health: Math.round(clamp(a.health ?? 100, 0, 100)),
@@ -565,11 +568,25 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
     resetsIn: zenStatus.resetsInFormatted,
     isRateLimited: zenStatus.isRateLimited,
     rateLimitResetFormatted: zenStatus.rateLimitResetFormatted,
-    routingMode: cfg.router.routingMode ?? "main-first",
+    routingMode: cfg.router?.zenRoutingMode ?? cfg.router?.routingMode ?? "main-first",
   };
 
+  const googleCfgPath = existsSync(join(configDir, "google.json"))
+    ? join(configDir, "google.json")
+    : join(configDir, "antigravity.json");
+  let googleRoutingMode = "main-first";
+  if (existsSync(googleCfgPath)) {
+    try {
+      const gc = JSON.parse(readFileSync(googleCfgPath, "utf-8"));
+      const raw = gc.account_selection_strategy || gc.routing_mode;
+      if (raw === "hybrid" || raw === "sticky-balanced" || raw === "balanced") googleRoutingMode = "sticky-balanced";
+      else if (raw === "sticky" || raw === "main-first") googleRoutingMode = "main-first";
+      else if (raw) googleRoutingMode = raw;
+    } catch {}
+  }
+
   return {
-    routingMode: cfg.router.routingMode ?? "main-first",
+    routingMode: cfg.router?.zenRoutingMode ?? cfg.router?.routingMode ?? "main-first",
     openai: {
       accounts: oaAccounts,
       routingMode: oaRoutingMode,
@@ -578,6 +595,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
     antigravity: {
       accounts: agAccounts,
       routeSummary: agRouteSummary,
+      routingMode: googleRoutingMode,
     },
     opencodeZen,
   };
@@ -952,7 +970,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                       <b>{acct.label}</b>
                     </text>
                     <text fg={toneColor(theme(), acct.active ? "ok" : "muted")}>
-                      <b>{acct.active ? `active: ${acct.activeFor || "?"}` : "idle"}</b>
+                      <b>{acct.active ? `active: ${acct.activeFor}` : "idle"}</b>
                     </text>
                   </box>
 
@@ -1012,7 +1030,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                 <b>{"Routing"}</b>
               </text>
               <text fg="#4285F4">
-                <b>{formatRoutingDisplay(data().antigravity.routeSummary)} {"\u25be"}</b>
+                <b>{formatRoutingDisplay(data().antigravity.routingMode)} {"\u25be"}</b>
               </text>
             </box>
           </Show>

@@ -194,7 +194,7 @@ export function getOpenAIAccounts(configDir = getOpenCodeConfigDir()): ProviderA
  */
 export function routingModeAction(mode: RoutingMode, provider: "openai" | "antigravity" = "openai"): NativeAction {
   const action = loginActionFor(provider);
-  const cmd = provider === "antigravity" ? "/antigravity-routing" : "/openai-routing";
+  const cmd = provider === "antigravity" ? "/google-routing" : "/openai-routing";
   const name = provider === "antigravity" ? "Google Antigravity" : "OpenAI";
   return { ...action, kind: "set-routing", command: cmd, arguments: mode, cli: { command: "", args: [] }, text: `Set ${name} routing to ${mode}.` };
 }
@@ -508,7 +508,7 @@ export function loginActionFor(provider: "openai" | "antigravity" | "chatgpt-web
     return {
       provider,
       kind: "login",
-      command: "/antigravity-account",
+      command: "/google-account",
       arguments: "add-oauth-start",
       cli: { command: "antigravity-auth", args: ["login"] },
       text: "Run native login to add a Google Antigravity account.",

@@ -277,7 +277,7 @@ describe("Unified manager-facing interface", () => {
     expect(oa.cli).toEqual({ command: "openai-auth", args: ["login"] });
 
     const ag = loginActionFor("antigravity");
-    expect(ag.command).toBe("/antigravity-account");
+    expect(ag.command).toBe("/google-account");
     expect(ag.arguments).toBe("add-oauth-start");
     expect(ag.cli).toEqual({ command: "antigravity-auth", args: ["login"] });
 

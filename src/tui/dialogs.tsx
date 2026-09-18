@@ -26,6 +26,7 @@ import { completeStep, loadConfig, resetManager, saveConfig, type RouterRoutingM
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { dispatchNative } from "./native.js";
 import { listChromeProfiles, importFromChromeProfile } from "../chatgpt-web/chrome-importer.js";
+import { findPortFile } from "../manager/quota-poller.js";
 
 type Api = TuiPluginApi;
 const configDir = () => getOpenCodeConfigDir();
@@ -46,6 +47,28 @@ function toastResult(api: Api, res: { ok: boolean; text: string }) {
 
 function errorToast(api: Api, text: string) {
   api.ui.toast({ variant: "error", title: "Invalid", message: text });
+}
+
+function closeDialog(api: Api) {
+  api.ui.dialog?.clear?.();
+}
+
+async function applyRpcCommandSilently(provider: "antigravity" | "openai", command: string, args: string) {
+  try {
+    const portEntry = await findPortFile(provider);
+    if (!portEntry) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    await fetch(`http://127.0.0.1:${portEntry.port}/rpc/apply`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${portEntry.token}`,
+      },
+      body: JSON.stringify({ command, arguments: args }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+  } catch {}
 }
 
 /** OpenAI routing preference via the native /openai-routing command. */
@@ -200,13 +223,13 @@ export function promptRoutingScope(
           title: "Apply to all sessions (save to config)",
           value: "all",
           description: "Persists to configuration. A restart may be required for background sessions.",
-          onSelect: () => onSelectScope("all"),
+          onSelect: () => { closeDialog(api); onSelectScope("all"); },
         },
         {
           title: "Apply to current session only",
           value: "session",
           description: "Active immediately for the current conversation without modifying persistent config.",
-          onSelect: () => onSelectScope("session"),
+          onSelect: () => { closeDialog(api); onSelectScope("session"); },
         },
       ]}
     />
@@ -245,7 +268,7 @@ export function openRoutingSelector(
             });
           },
         })),
-        { title: "< Back", value: "__back", onSelect: () => onDone?.() },
+        { title: "< Back", value: "__back", onSelect: () => { if (onDone) onDone(); else closeDialog(api); } },
       ]}
     />
   ));
@@ -276,7 +299,7 @@ export function setOpenAIRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: 
       return;
     }
   }
-  void dispatchNative(api, { ...routingModeAction(nativeMode as any, "openai"), command: "/openai-routing", arguments: nativeMode });
+  void applyRpcCommandSilently("openai", "openai-routing", nativeMode);
   api.ui.toast({
     variant: "success",
     title: "OpenAI routing",
@@ -330,14 +353,7 @@ export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: 
       return;
     }
   }
-  void dispatchNative(api, {
-    provider: "antigravity",
-    kind: "set-routing",
-    command: "/antigravity-routing",
-    arguments: nativeMode,
-    cli: { command: "", args: [] },
-    text: `Set Google routing to ${nativeMode}`,
-  });
+  void applyRpcCommandSilently("antigravity", "google-routing", nativeMode);
   api.ui.toast({
     variant: "success",
     title: "Google routing",
@@ -346,10 +362,23 @@ export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: 
 }
 
 export function setOpenCodeZenRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
+  const nativeMode = mode === ("balanced" as any) ? "sticky-balanced" : mode;
+  if (scope === "all") {
+    try {
+      const c = cfg();
+      if (c.router) {
+        c.router.zenRoutingMode = nativeMode;
+        saveConfig(c);
+      }
+    } catch {
+      api.ui.toast({ variant: "error", title: "Error", message: "Failed to update manager.json" });
+      return;
+    }
+  }
   api.ui.toast({
     variant: "success",
     title: "OpenCode Zen routing",
-    message: `OpenCode Zen routing set to ${mode} (${scope === "session" ? "current session" : "all sessions"}).`,
+    message: `OpenCode Zen routing set to ${nativeMode} (${scope === "session" ? "current session" : "all sessions"}).`,
   });
 }
 

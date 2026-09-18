@@ -147,8 +147,8 @@ describe("TUI wizard + native dispatch", () => {
     const scopeAll = h.find("all");
     expect(scopeAll).toBeTruthy();
     scopeAll!.onSelect!();
-    await vi.waitFor(() => expect(h.command).toHaveBeenCalled());
-    expect(h.command).toHaveBeenCalledWith(expect.objectContaining({ command: "openai-routing" }));
+    // Routing is applied via a silent RPC (no session command dispatched).
+    expect(h.command).not.toHaveBeenCalled();
   });
 
   it("wizard resumes at the first missing tier without skipping", () => {
@@ -499,7 +499,7 @@ describe("TUI wizard + native dispatch", () => {
     expect(h.api.ui as any).toBeTruthy();
   });
 
-  it("routing selector dialog stays open until user dismisses it (does not auto-close)", () => {
+  it("routing selector dialog closes after a scope is chosen", () => {
     const h = makeApi();
     openRoutingSelector(h.api as never, "openai");
 
@@ -515,9 +515,9 @@ describe("TUI wizard + native dispatch", () => {
     expect(h.last()?.title).toContain("Choose scope");
     expect(h.last()).not.toBeNull();
 
-    // Choosing a scope applies the change; dialog is replaced by the next view, not auto-closed
+    // Choosing a scope applies the change and closes the dialog
     h.find("session")!.onSelect!();
-    expect(h.last()).not.toBeNull();
+    expect(h.last()).toBeNull();
   });
 
   it("toggleZen toggles signal and preferences file tracks zenCollapsed", async () => {

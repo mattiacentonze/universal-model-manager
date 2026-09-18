@@ -1,12 +1,47 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AccountEntry, FallbackTarget, ManagerConfig, RouterSettings, TierChain, WizardState } from "./types.js";
+import type {
+  AccountEntry,
+  FallbackTarget,
+  ManagerConfig,
+  RouterRoutingMode,
+  RouterSettings,
+  TierChain,
+  UnifiedRoutingConfig,
+  UnifiedRoutingMode,
+  UnifiedRoutingParameters,
+  WizardState,
+} from "./types.js";
 import { getUniversalAuthDataDir, getOpenCodeConfigDir } from "../shared/paths.js";
 import { providerConfigured, reconcileConfigured } from "./auth-status.js";
 
 export const MANAGER_FILE = "manager.json";
 export const MANAGER_VERSION = 1;
 export const TIER_NAMES = ["fast", "medium", "heavy"] as const;
+
+export const UNIFIED_ROUTING_MODES: UnifiedRoutingMode[] = [
+  "main-first",
+  "load-balancing",
+  "latency-based",
+  "cost-based",
+  "usage-based",
+];
+
+export const DEFAULT_UNIFIED_ROUTING_PARAMETERS: UnifiedRoutingParameters = {
+  softQuotaThresholdPercent: 80,
+  proactiveRotationThresholdPercent: 0,
+  switchOnFirstRateLimit: false,
+  maxAccountSwitches: 10,
+  maxCacheFirstWaitSeconds: 60,
+  pidOffsetEnabled: false,
+  latencyWindowMs: 60000,
+  costWindowMs: 86400000,
+};
+
+export const DEFAULT_UNIFIED_ROUTING: UnifiedRoutingConfig = {
+  mode: "main-first",
+  parameters: { ...DEFAULT_UNIFIED_ROUTING_PARAMETERS },
+};
 
 export const DEFAULT_CHAIN: TierChain = {
   model: "iit/deepseek-v4-flash",
@@ -111,6 +146,7 @@ function isRouter(v: unknown): v is RouterSettings {
   if (r.orchestrator !== "" && !isValidModelId(r.orchestrator)) return false;
   if (typeof r.enabled !== "boolean") return false;
   if (r.routingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.routingMode))) return false;
+  if (r.zenRoutingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.zenRoutingMode))) return false;
   if (r.orchestratorVariant !== undefined && typeof r.orchestratorVariant !== "string") return false;
   if (r.orchestratorFallbacks !== undefined && (!Array.isArray(r.orchestratorFallbacks) || r.orchestratorFallbacks.some(f => typeof f !== "string"))) return false;
   const t = r.tiers as Record<string, unknown> | undefined;

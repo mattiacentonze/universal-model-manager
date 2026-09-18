@@ -318,6 +318,7 @@ describe("fallback engine routing modes", () => {
       cooldown_seconds: 0,
       routing_mode: routingMode,
       fallback_models: CHAIN,
+      max_fallback_attempts: 5,
     } as any);
     await hooks.config!({
       agent: { build: { model: CHAIN[0], fallback_models: CHAIN } },

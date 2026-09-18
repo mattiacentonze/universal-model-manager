@@ -13147,6 +13147,7 @@ function throwHandledCommandSentinel() {
   throw new Error(HANDLED_COMMAND_SENTINEL);
 }
 async function buildDialogPayload(command, argumentsText, context) {
+  command = (command || "").replace(/^google-/, "antigravity-");
   switch (command) {
     case "antigravity-quota": {
       const action = argumentsText.trim().toLowerCase();
@@ -13157,7 +13158,7 @@ async function buildDialogPayload(command, argumentsText, context) {
       }
       return {
         command,
-        text: "Antigravity quota",
+        text: "Google quota",
         knobs: {
           mode: action === "refresh" ? "refresh" : "status",
           accounts
@@ -13169,7 +13170,7 @@ async function buildDialogPayload(command, argumentsText, context) {
       const accounts = context.commandData ? await context.commandData.listAccounts() : [];
       return {
         command,
-        text: "Antigravity accounts",
+        text: "Google accounts",
         knobs: {
           action: action === "add" || action === "refresh" || action === "remove" || action === "list" ? action : "list",
           accounts
@@ -13196,7 +13197,7 @@ async function buildDialogPayload(command, argumentsText, context) {
       const parsed = parseKillswitchArguments(argumentsText);
       return {
         command,
-        text: "Antigravity killswitch",
+        text: "Google killswitch",
         knobs: {
           enabled: parsed.enabled ?? settings.killswitch.enabled,
           minimum_remaining_percent: parsed.minimum_remaining_percent ?? settings.killswitch.minimum_remaining_percent,
@@ -13209,7 +13210,7 @@ async function buildDialogPayload(command, argumentsText, context) {
       const action = parseGeminiDumpCommandAction(argumentsText);
       return {
         command,
-        text: "Antigravity wire dump",
+        text: "Google wire dump",
         knobs: {
           mode: action.type === "usage" ? "status" : action.type
         }
@@ -13219,7 +13220,7 @@ async function buildDialogPayload(command, argumentsText, context) {
       const level = parseLoggingLevel(argumentsText);
       return {
         command,
-        text: "Antigravity logging",
+        text: "Google logging",
         knobs: { log_level: level }
       };
     }
@@ -13296,6 +13297,7 @@ function parseAccountAction(input2) {
   return void 0;
 }
 async function applyCommand(request, context) {
+  request.command = (request.command || "").replace(/^google-/, "antigravity-");
   const result = await applyCommandInner(request, context);
   if (context.onApplied) {
     const accounts = result.knobs.accounts;
@@ -13653,11 +13655,8 @@ function createCommandExecuteBefore(client, settings, pushNotification2, command
     commandData
   };
   return async (input2, output) => {
-    if (input2.command === "google-routing") {
-      input2.command = "antigravity-routing";
-    }
-    if (input2.command === "google-quota") {
-      input2.command = "antigravity-quota";
+    if (input2.command.startsWith("google-")) {
+      input2.command = input2.command.replace(/^google-/, "antigravity-");
     }
     const command = input2.command;
     if (command === GEMINI_DUMP_COMMAND_NAME) {
@@ -13685,7 +13684,8 @@ function createCommandExecuteBefore(client, settings, pushNotification2, command
             arguments: input2.arguments.trim(),
             sessionId: input2.sessionID
           }, context);
-          if (output && output.parts) {
+          if (output && Array.isArray(output.parts)) {
+            output.parts.length = 0;
             output.parts.push({ type: "text", text: result.text });
           } else if (!connectionState.isTuiConnected(input2.sessionID)) {
             await sendIgnoredMessage(client, input2.sessionID, result.text);
@@ -13700,7 +13700,8 @@ function createCommandExecuteBefore(client, settings, pushNotification2, command
         sessionID: input2.sessionID
       });
       pushNotification2(payload, input2.sessionID);
-      if (output && output.parts) {
+      if (output && Array.isArray(output.parts)) {
+        output.parts.length = 0;
         output.parts.push({ type: "text", text: payload.text });
       } else if (!connectionState.isTuiConnected(input2.sessionID)) {
         await sendIgnoredMessage(client, input2.sessionID, payload.text);
@@ -13743,14 +13744,12 @@ function registerAntigravityCommands(config) {
   if (!config) return;
   config.command = config.command || {};
   const commands = [
-    { name: "antigravity-routing", desc: "Configure Google Antigravity account routing strategy" },
-    { name: "antigravity-quota", desc: "Refresh Google Antigravity quota" },
-    { name: "antigravity-account", desc: "Manage Google Antigravity accounts" },
-    { name: "antigravity-killswitch", desc: "Manage Google Antigravity killswitch" },
-    { name: "antigravity-dump", desc: "Manage Google Antigravity diagnostic dumps" },
-    { name: "antigravity-logging", desc: "Configure Google Antigravity logging level" },
-    { name: "google-routing", desc: "Configure Google account routing strategy (alias)" },
-    { name: "google-quota", desc: "Refresh Google quota (alias)" },
+    { name: "google-routing", desc: "Configure Google account routing strategy" },
+    { name: "google-quota", desc: "Refresh Google quota" },
+    { name: "google-account", desc: "Manage Google accounts" },
+    { name: "google-killswitch", desc: "Manage Google killswitch" },
+    { name: "google-dump", desc: "Manage Google diagnostic dumps" },
+    { name: "google-logging", desc: "Configure Google logging level" },
   ];
   for (const cmd of commands) {
     config.command[cmd.name] = {

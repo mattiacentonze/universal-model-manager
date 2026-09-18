@@ -73,7 +73,7 @@ describe("quota-poller", () => {
     expect(url).toBe("http://127.0.0.1:12345/rpc/apply");
     expect(init.method).toBe("POST");
     expect(init.headers.authorization).toBe("Bearer secret");
-    expect(JSON.parse(init.body).command).toBe("antigravity-quota");
+    expect(JSON.parse(init.body).command).toBe("google-quota");
     expect(JSON.parse(init.body).arguments).toBe("refresh");
   });
 

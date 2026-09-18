@@ -27,7 +27,7 @@ const INITIAL_REFRESH_DELAY_MS = 2 * 1000;
 const MIN_AUTO_REFRESH_GAP_MS = 10 * 1000;
 
 const PROVIDER_COMMANDS: Record<QuotaProvider, string> = {
-  antigravity: "antigravity-quota",
+  antigravity: "google-quota",
   openai: "openai-quota",
 };
 

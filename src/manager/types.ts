@@ -43,6 +43,29 @@ export interface TierChain {
  */
 export type RouterRoutingMode = "main-first" | "sticky-balanced" | "round-robin" | "fallback-first" | "sticky" | "balanced";
 
+export type UnifiedRoutingMode =
+  | "main-first"
+  | "load-balancing"
+  | "latency-based"
+  | "cost-based"
+  | "usage-based";
+
+export interface UnifiedRoutingParameters {
+  softQuotaThresholdPercent: number;
+  proactiveRotationThresholdPercent: number;
+  switchOnFirstRateLimit: boolean;
+  maxAccountSwitches: number;
+  maxCacheFirstWaitSeconds: number;
+  pidOffsetEnabled: boolean;
+  latencyWindowMs: number;
+  costWindowMs: number;
+}
+
+export interface UnifiedRoutingConfig {
+  mode: UnifiedRoutingMode;
+  parameters: UnifiedRoutingParameters;
+}
+
 export interface RouterSettings {
   orchestrator: string;
   orchestratorVariant?: string;
@@ -51,6 +74,9 @@ export interface RouterSettings {
   enabled: boolean;
   /** General fallback routing mode for the manager-owned engine. */
   routingMode?: RouterRoutingMode;
+  zenRoutingMode?: RouterRoutingMode;
+  /** Unified routing engine configuration. */
+  routing?: UnifiedRoutingConfig;
 }
 
 export type TierName = "fast" | "medium" | "heavy";
