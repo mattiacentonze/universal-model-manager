@@ -21,7 +21,8 @@ export function managerFallbackChain(): string[] {
 export const fallbackPlugin: Plugin = async (input, options) => {
   const pluginFn: any = fallbackPkg;
   const chain = managerFallbackChain();
-  const routingMode = loadConfig().router.routingMode ?? "main-first";
+  const cfg = loadConfig();
+  const routingMode = cfg.router.routing?.mode ?? cfg.router.routingMode ?? "main-first";
   const hooks = await pluginFn(input, { ...options, fallback_models: chain, routing_mode: routingMode });
   const baseConfig = hooks.config;
   // opencode-runtime-fallback 0.2.4 reads the global chain from its file config,

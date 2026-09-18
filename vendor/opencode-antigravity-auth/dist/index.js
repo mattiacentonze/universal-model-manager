@@ -6822,7 +6822,13 @@ var COMMANDS = /* @__PURE__ */ new Set([
   "antigravity-routing",
   "antigravity-killswitch",
   "antigravity-dump",
-  "antigravity-logging"
+  "antigravity-logging",
+  "google-quota",
+  "google-account",
+  "google-routing",
+  "google-killswitch",
+  "google-dump",
+  "google-logging"
 ]);
 var HttpError = class extends Error {
   constructor(status, message) {
@@ -13471,26 +13477,26 @@ ${result.url}`,
     }
     case "antigravity-routing": {
       const rawArg = (request.arguments || "").trim().toLowerCase();
-      if (["main-first", "fallback-first", "sticky-balanced", "round-robin"].includes(rawArg)) {
+      if (["main-first", "fallback-first", "sticky-balanced", "round-robin", "load-balancing", "latency-based", "cost-based", "usage-based", "hybrid"].includes(rawArg)) {
         try {
           const configPath = getUserConfigPath();
           let cfg = {};
           if (existsSync8(configPath)) {
             try { cfg = JSON.parse(readFileSync11(configPath, "utf-8")); } catch {}
           }
-          cfg.account_selection_strategy = rawArg;
+          let effectiveStrategy = rawArg;
+          if (rawArg === "load-balancing") effectiveStrategy = "round-robin";
+          else if (rawArg === "latency-based" || rawArg === "cost-based" || rawArg === "usage-based" || rawArg === "sticky-balanced") effectiveStrategy = "hybrid";
+          cfg.account_selection_strategy = effectiveStrategy;
           delete cfg.routing_mode;
           if (rawArg === "main-first") {
             cfg.scheduling_mode = "cache_first";
             cfg.switch_on_first_rate_limit = false;
-          } else if (rawArg === "sticky-balanced") {
+          } else if (rawArg === "sticky-balanced" || rawArg === "fallback-first" || rawArg === "latency-based" || rawArg === "cost-based" || rawArg === "usage-based") {
             cfg.scheduling_mode = "balance";
             cfg.switch_on_first_rate_limit = true;
-          } else if (rawArg === "round-robin") {
+          } else if (rawArg === "round-robin" || rawArg === "load-balancing") {
             cfg.scheduling_mode = "performance_first";
-            cfg.switch_on_first_rate_limit = true;
-          } else if (rawArg === "fallback-first") {
-            cfg.scheduling_mode = "balance";
             cfg.switch_on_first_rate_limit = true;
           }
           await writeJsonAtomic(configPath, cfg);
@@ -19976,24 +19982,24 @@ ${debugText}` : "";
         "x-antigravity-cached-content-token-count",
         String(usage.cachedContentTokenCount)
       );
-      if (usage.totalTokenCount !== void 0) {
-        headers.set(
-          "x-antigravity-total-token-count",
-          String(usage.totalTokenCount)
-        );
-      }
-      if (usage.promptTokenCount !== void 0) {
-        headers.set(
-          "x-antigravity-prompt-token-count",
-          String(usage.promptTokenCount)
-        );
-      }
-      if (usage.candidatesTokenCount !== void 0) {
-        headers.set(
-          "x-antigravity-candidates-token-count",
-          String(usage.candidatesTokenCount)
-        );
-      }
+    }
+    if (usage?.totalTokenCount !== void 0) {
+      headers.set(
+        "x-antigravity-total-token-count",
+        String(usage.totalTokenCount)
+      );
+    }
+    if (usage?.promptTokenCount !== void 0) {
+      headers.set(
+        "x-antigravity-prompt-token-count",
+        String(usage.promptTokenCount)
+      );
+    }
+    if (usage?.candidatesTokenCount !== void 0) {
+      headers.set(
+        "x-antigravity-candidates-token-count",
+        String(usage.candidatesTokenCount)
+      );
     }
     logAntigravityDebugResponse(debugContext, response, {
       body: text,
@@ -21004,11 +21010,30 @@ function createFetchInterceptor(context) {
             pushDebug(
               `dispatching request via ${prepared.headerStyle} transport`
             );
+            const _t0 = Date.now();
             const response = prepared.headerStyle === "antigravity" ? await transport(
               toUrlString(prepared.request),
               prepared.init,
               { signal: abortSignal, onDebug: pushDebug }
             ) : await upstreamFetch(prepared.request, prepared.init);
+            const _tDuration = Date.now() - _t0;
+            try {
+              if (globalThis.__UMM_TELEMETRY__?.latency) {
+                globalThis.__UMM_TELEMETRY__.latency.recordLatency(account.index, _tDuration);
+              }
+            } catch {}
+            try {
+              if (globalThis.__UMM_TELEMETRY__?.cost) {
+                const _pTokens = Number(response.headers?.get ? response.headers.get("x-antigravity-prompt-token-count") : response.headers?.["x-antigravity-prompt-token-count"]) || 0;
+                const _cTokens = Number(response.headers?.get ? response.headers.get("x-antigravity-candidates-token-count") : response.headers?.["x-antigravity-candidates-token-count"]) || 0;
+                const _model = prepared.effectiveModel || prepared.requestedModel || family || "";
+                const _pTable = { "gemini-2.5-pro": [1.25, 5.0], "gemini-2.5-flash": [0.075, 0.3], "gemini-3-flash": [0.1, 0.4], "gemini-3.8-flash": [0.1, 0.4] };
+                const _mKey = Object.keys(_pTable).find(k => _model.includes(k));
+                const _rates = _mKey ? _pTable[_mKey] : [0.5, 2.0];
+                const _cost = (_pTokens / 1e6) * _rates[0] + (_cTokens / 1e6) * _rates[1];
+                globalThis.__UMM_TELEMETRY__.cost.recordCost(account.index, _cost, _pTokens, _cTokens);
+              }
+            } catch {}
             apiRequestCount++;
             accountManager.recordRequest(account.index, family);
             const requestCounts = accountManager.getDailyRequestCounts(

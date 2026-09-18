@@ -27,6 +27,10 @@ const ON_PACE_DELTA = 1;
 export function formatRoutingDisplay(mode: string): string {
   if (!mode) return "Main first";
   const m = mode.toLowerCase();
+  if (m.includes("load-balancing") || m.includes("load balancing")) return "Load balancing";
+  if (m.includes("latency-based") || m.includes("latency based") || m.includes("latency")) return "Latency based";
+  if (m.includes("cost-based") || m.includes("cost based") || m.includes("cost")) return "Cost based";
+  if (m.includes("usage-based") || m.includes("usage based") || m.includes("usage")) return "Usage based";
   if (m.includes("round-robin") || m.includes("round robin")) return "Round robin";
   if (m.includes("fallback-first") || m.includes("fallback first")) return "Fallback first";
   if (m.includes("balanced") || m.includes("least-used") || m.includes("hybrid")) return "Sticky balanced";
@@ -330,7 +334,8 @@ export interface UnifiedSidebarData {
 }
 
 export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?: string): UnifiedSidebarData {
-  const cfg = loadConfig(undefined, configDir);
+  const cfgPath = join(configDir, "manager.json");
+  const cfg = existsSync(cfgPath) ? loadConfig(configDir, configDir) : loadConfig(undefined, configDir);
   const now = Date.now();
 
   // 1. OPENAI STATE
@@ -556,6 +561,10 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
 
   const zenConfigured = isOpencodeConfigured(configDir);
   const zenStatus = zenUsageTracker.getStatus(zenConfigured, "big-pickle");
+  const unifiedRoutingMode = (cfg.router?.routing?.mode && cfg.router.routing.mode !== "main-first")
+    ? cfg.router.routing.mode
+    : (cfg.router?.routingMode ?? cfg.router?.zenRoutingMode ?? cfg.router?.routing?.mode ?? "main-first");
+
   const opencodeZen: OpenCodeZenDisplayData = {
     isConfigured: zenConfigured,
     model: zenStatus.model,
@@ -568,28 +577,26 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
     resetsIn: zenStatus.resetsInFormatted,
     isRateLimited: zenStatus.isRateLimited,
     rateLimitResetFormatted: zenStatus.rateLimitResetFormatted,
-    routingMode: cfg.router?.zenRoutingMode ?? cfg.router?.routingMode ?? "main-first",
+    routingMode: unifiedRoutingMode,
   };
 
   const googleCfgPath = existsSync(join(configDir, "google.json"))
     ? join(configDir, "google.json")
     : join(configDir, "antigravity.json");
-  let googleRoutingMode = "main-first";
+  let googleRoutingMode = unifiedRoutingMode;
   if (existsSync(googleCfgPath)) {
     try {
       const gc = JSON.parse(readFileSync(googleCfgPath, "utf-8"));
       const raw = gc.account_selection_strategy || gc.routing_mode;
-      if (raw === "hybrid" || raw === "sticky-balanced" || raw === "balanced") googleRoutingMode = "sticky-balanced";
-      else if (raw === "sticky" || raw === "main-first") googleRoutingMode = "main-first";
-      else if (raw) googleRoutingMode = raw;
+      if (raw) googleRoutingMode = raw;
     } catch {}
   }
 
   return {
-    routingMode: cfg.router?.zenRoutingMode ?? cfg.router?.routingMode ?? "main-first",
+    routingMode: unifiedRoutingMode,
     openai: {
       accounts: oaAccounts,
-      routingMode: oaRoutingMode,
+      routingMode: cfg.router?.routing?.mode ?? oaRoutingMode,
     },
     chatgptWeb,
     antigravity: {

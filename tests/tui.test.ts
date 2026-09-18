@@ -144,9 +144,6 @@ describe("TUI wizard + native dispatch", () => {
     const mainFirst = h.find("main-first");
     expect(mainFirst).toBeTruthy();
     mainFirst!.onSelect!();
-    const scopeAll = h.find("all");
-    expect(scopeAll).toBeTruthy();
-    scopeAll!.onSelect!();
     // Routing is applied via a silent RPC (no session command dispatched).
     expect(h.command).not.toHaveBeenCalled();
   });
@@ -313,15 +310,12 @@ describe("TUI wizard + native dispatch", () => {
     expect(routingManager).toBeTruthy();
     expect(routingManager!.title).toMatch(/Model Manager routing mode/);
 
-    // Open the selector and pick round-robin -> scope dialog -> all -> persists to manager config.
+    // Open the selector and pick load-balancing -> persists to manager config.
     routingManager!.onSelect!();
-    const roundRobin = h.find("round-robin");
-    expect(roundRobin).toBeTruthy();
-    roundRobin!.onSelect!();
-    const scopeAll = h.find("all");
-    expect(scopeAll).toBeTruthy();
-    scopeAll!.onSelect!();
-    expect(loadConfig().router.routingMode).toBe("round-robin");
+    const loadBalancing = h.find("load-balancing");
+    expect(loadBalancing).toBeTruthy();
+    loadBalancing!.onSelect!();
+    expect(loadConfig().router.routing?.mode).toBe("load-balancing");
   });
 
   it("toggleManager, toggleOpenai, and toggleAntigravity update signals and persist preferences", async () => {
@@ -468,55 +462,43 @@ describe("TUI wizard + native dispatch", () => {
     expect(h.last()?.title).toContain("HEAVY");
   });
 
-  it("UNIFIED_ROUTING_OPTIONS exposes the 4 unified options with detailed descriptions", () => {
+  it("UNIFIED_ROUTING_OPTIONS exposes the 5 unified options with detailed descriptions", () => {
     const values = UNIFIED_ROUTING_OPTIONS.map(o => o.value);
-    expect(values).toEqual(["main-first", "round-robin", "fallback-first", "sticky-balanced"]);
+    expect(values).toEqual(["main-first", "load-balancing", "latency-based", "cost-based", "usage-based"]);
     for (const opt of UNIFIED_ROUTING_OPTIONS) {
       expect(opt.title).toBeTruthy();
       expect(opt.description).toBeTruthy();
     }
   });
 
-  it("openRoutingSelector presents all 4 options and prompts for scope (session vs all)", () => {
+  it("openRoutingSelector presents all 5 options and applies immediately", () => {
     const h = makeApi();
     openRoutingSelector(h.api as never, "manager");
 
     expect(h.last()?.title).toContain("Model Manager routing mode");
-    const balanced = h.find("sticky-balanced");
-    expect(balanced).toBeTruthy();
-    expect(balanced!.title).toBe("Sticky Balanced");
+    const loadBalancing = h.find("load-balancing");
+    expect(loadBalancing).toBeTruthy();
+    expect(loadBalancing!.title).toBe("Load balancing");
 
-    // Select balanced -> scope prompt appears
-    balanced!.onSelect!();
-    expect(h.last()?.title).toContain("Choose scope");
-    const scopeSession = h.find("session");
-    const scopeAll = h.find("all");
-    expect(scopeSession).toBeTruthy();
-    expect(scopeAll).toBeTruthy();
-
-    // Select session scope
-    scopeSession!.onSelect!();
+    // Select load-balancing -> applies immediately
+    loadBalancing!.onSelect!();
     expect(h.api.ui as any).toBeTruthy();
   });
 
-  it("routing selector dialog closes after a scope is chosen", () => {
+  it("routing selector dialog closes after selection", () => {
     const h = makeApi();
     openRoutingSelector(h.api as never, "openai");
 
-    // Dialog is open with all 4 options
+    // Dialog is open with all 5 options
     expect(h.last()?.title).toContain("OpenAI account routing mode");
     expect(h.find("main-first")).toBeTruthy();
-    expect(h.find("round-robin")).toBeTruthy();
-    expect(h.find("fallback-first")).toBeTruthy();
-    expect(h.find("sticky-balanced")).toBeTruthy();
+    expect(h.find("load-balancing")).toBeTruthy();
+    expect(h.find("latency-based")).toBeTruthy();
+    expect(h.find("cost-based")).toBeTruthy();
+    expect(h.find("usage-based")).toBeTruthy();
 
-    // Selecting an option opens the scope prompt (dialog remains open, not cleared)
-    h.find("sticky-balanced")!.onSelect!();
-    expect(h.last()?.title).toContain("Choose scope");
-    expect(h.last()).not.toBeNull();
-
-    // Choosing a scope applies the change and closes the dialog
-    h.find("session")!.onSelect!();
+    // Choosing an option applies the change and closes the dialog
+    h.find("load-balancing")!.onSelect!();
     expect(h.last()).toBeNull();
   });
 

@@ -9,7 +9,7 @@ import {
   promptRoutingScope,
 } from "../src/tui/dialogs.js";
 import { gatherSidebarData, formatRoutingDisplay } from "../src/tui/sidebar-widget.js";
-import { loadConfig, saveConfig } from "../src/manager/index.js";
+import { loadConfig, saveConfig, syncUnifiedRouting, translateToProvider } from "../src/manager/index.js";
 import { writeProviderCreds } from "./helpers.js";
 
 type DialogOpt = { title?: string; value: string; onSelect?: () => void; description?: string };
@@ -62,41 +62,42 @@ function writeGoogleConfig(configDir: string, strategy: string) {
   writeFileSync(join(configDir, "google.json"), JSON.stringify({ account_selection_strategy: strategy }, null, 2));
 }
 
-describe("routing flow", () => {
+describe("routing flow with unified 5 modes", () => {
   let cfgDir: string;
   beforeEach(() => {
     cfgDir = mkdtempSync(join(tmpdir(), "routing-"));
     process.env.OPENCODE_CONFIG_DIR = cfgDir;
   });
 
-  it("getGoogleRoutingMode reads all 4 modes accurately from config", () => {
+  it("getGoogleRoutingMode reads modes accurately from config", () => {
     writeGoogleConfig(cfgDir, "sticky-balanced");
-    expect(getGoogleRoutingMode()).toBe("sticky-balanced");
-
-    writeGoogleConfig(cfgDir, "hybrid");
-    expect(getGoogleRoutingMode()).toBe("sticky-balanced");
-
-    writeGoogleConfig(cfgDir, "balanced");
-    expect(getGoogleRoutingMode()).toBe("sticky-balanced");
+    expect(getGoogleRoutingMode()).toBe("load-balancing");
 
     writeGoogleConfig(cfgDir, "main-first");
-    expect(getGoogleRoutingMode()).toBe("main-first");
-
-    writeGoogleConfig(cfgDir, "sticky");
     expect(getGoogleRoutingMode()).toBe("main-first");
 
     writeGoogleConfig(cfgDir, "round-robin");
-    expect(getGoogleRoutingMode()).toBe("round-robin");
+    expect(getGoogleRoutingMode()).toBe("load-balancing");
 
-    writeGoogleConfig(cfgDir, "fallback-first");
-    expect(getGoogleRoutingMode()).toBe("fallback-first");
+    writeGoogleConfig(cfgDir, "latency-based");
+    expect(getGoogleRoutingMode()).toBe("latency-based");
+
+    writeGoogleConfig(cfgDir, "cost-based");
+    expect(getGoogleRoutingMode()).toBe("cost-based");
+
+    writeGoogleConfig(cfgDir, "usage-based");
+    expect(getGoogleRoutingMode()).toBe("usage-based");
   });
 
-  it("setGoogleRoutingMode updates google.json without injecting commands into session.command", () => {
-    writeGoogleConfig(cfgDir, "main-first");
+  it("setGoogleRoutingMode updates config via syncUnifiedRouting without injecting into session.command", async () => {
+    const cfg = loadConfig(cfgDir);
+    saveConfig(cfg, cfgDir);
     const h = makeApi();
 
-    setGoogleRoutingMode(h.api as never, "round-robin", "all");
+    setGoogleRoutingMode(h.api as never, "load-balancing", "all");
+
+    // Wait a tick for async write
+    await new Promise(r => setTimeout(r, 50));
 
     const saved = JSON.parse(readFileSync(join(cfgDir, "google.json"), "utf8"));
     expect(saved.account_selection_strategy).toBe("round-robin");
@@ -106,20 +107,25 @@ describe("routing flow", () => {
     expect(h.command).not.toHaveBeenCalled();
   });
 
-  it("setGoogleRoutingMode persists sticky-balanced and fallback-first scheduling", () => {
+  it("syncUnifiedRouting persists across all providers with static parameter mappings", async () => {
+    const cfg = loadConfig(cfgDir);
+    saveConfig(cfg, cfgDir);
     const h = makeApi();
 
-    setGoogleRoutingMode(h.api as never, "sticky-balanced", "all");
-    let saved = JSON.parse(readFileSync(join(cfgDir, "google.json"), "utf8"));
-    expect(saved.account_selection_strategy).toBe("sticky-balanced");
-    expect(saved.scheduling_mode).toBe("balance");
-    expect(saved.switch_on_first_rate_limit).toBe(true);
+    await syncUnifiedRouting(h.api as never, "latency-based");
 
-    setGoogleRoutingMode(h.api as never, "fallback-first", "all");
-    saved = JSON.parse(readFileSync(join(cfgDir, "google.json"), "utf8"));
-    expect(saved.account_selection_strategy).toBe("fallback-first");
-    expect(saved.scheduling_mode).toBe("balance");
-    expect(saved.switch_on_first_rate_limit).toBe(true);
+    const savedGoogle = JSON.parse(readFileSync(join(cfgDir, "google.json"), "utf8"));
+    expect(savedGoogle.account_selection_strategy).toBe("hybrid");
+    expect(savedGoogle.scheduling_mode).toBe("balance");
+    expect(savedGoogle.switch_on_first_rate_limit).toBe(true);
+    expect(savedGoogle.soft_quota_threshold_percent).toBe(80);
+
+    const savedOai = JSON.parse(readFileSync(join(cfgDir, "openai-auth.json"), "utf8"));
+    expect(savedOai.routing.mode).toBe("sticky-balanced");
+
+    const savedManager = loadConfig(cfgDir);
+    expect(savedManager.router.routing?.mode).toBe("latency-based");
+    expect(savedManager.router.routing?.parameters.latencyWindowMs).toBe(60000);
   });
 
   it("closeDialog is invoked on < Back in the routing selector", () => {
@@ -131,18 +137,16 @@ describe("routing flow", () => {
     expect(h.last()).toBeNull();
   });
 
-  it("closeDialog is invoked after scope selection", () => {
+  it("selection directly applies routing and closes dialog (removing fake session scope)", async () => {
+    const cfg = loadConfig(cfgDir);
+    saveConfig(cfg, cfgDir);
     const h = makeApi();
     openRoutingSelector(h.api as never, "google");
-    const mode = h.find("round-robin");
+    const mode = h.find("load-balancing");
     expect(mode).toBeTruthy();
     mode!.onSelect!();
-    // Scope dialog is now open.
-    expect(h.last()?.title).toContain("Choose scope");
-    const scopeAll = h.find("all");
-    expect(scopeAll).toBeTruthy();
-    scopeAll!.onSelect!();
-    // Scope selection closes the dialog.
+
+    await new Promise(r => setTimeout(r, 50));
     expect(h.last()).toBeNull();
   });
 
@@ -157,37 +161,34 @@ describe("routing flow", () => {
     expect(h.last()).toBeNull();
   });
 
-  it("gatherSidebarData returns antigravity.routingMode from google.json", () => {
+  it("gatherSidebarData returns routingMode", () => {
     writeProviderCreds(cfgDir, ["antigravity"]);
-    const cfg = loadConfig();
+    const cfg = loadConfig(cfgDir);
+    cfg.router.routing = {
+      mode: "cost-based",
+      parameters: {
+        softQuotaThresholdPercent: 80,
+        proactiveRotationThresholdPercent: 20,
+        switchOnFirstRateLimit: true,
+        maxAccountSwitches: 10,
+        maxCacheFirstWaitSeconds: 60,
+        pidOffsetEnabled: false,
+        latencyWindowMs: 60000,
+        costWindowMs: 86400000,
+      },
+    };
     saveConfig(cfg, cfgDir);
 
-    writeGoogleConfig(cfgDir, "sticky-balanced");
-    expect(gatherSidebarData(cfgDir).antigravity.routingMode).toBe("sticky-balanced");
-
-    writeGoogleConfig(cfgDir, "round-robin");
-    expect(gatherSidebarData(cfgDir).antigravity.routingMode).toBe("round-robin");
-
-    writeGoogleConfig(cfgDir, "fallback-first");
-    expect(gatherSidebarData(cfgDir).antigravity.routingMode).toBe("fallback-first");
-
-    writeGoogleConfig(cfgDir, "main-first");
-    expect(gatherSidebarData(cfgDir).antigravity.routingMode).toBe("main-first");
+    const sidebar = gatherSidebarData(cfgDir);
+    expect(sidebar.routingMode).toBe("cost-based");
   });
 
-  it("gatherSidebarData falls back to antigravity.json when google.json is absent", () => {
-    writeProviderCreds(cfgDir, ["antigravity"]);
-    const cfg = loadConfig();
-    saveConfig(cfg, cfgDir);
-
-    writeFileSync(join(cfgDir, "antigravity.json"), JSON.stringify({ account_selection_strategy: "round-robin" }, null, 2));
-    expect(existsSync(join(cfgDir, "google.json"))).toBe(false);
-    expect(gatherSidebarData(cfgDir).antigravity.routingMode).toBe("round-robin");
-  });
-
-  it("formatRoutingDisplay formats the routing mode cleanly", () => {
-    expect(formatRoutingDisplay("sticky-balanced")).toBe("Sticky balanced");
+  it("formatRoutingDisplay formats the 5 routing modes cleanly", () => {
     expect(formatRoutingDisplay("main-first")).toBe("Main first");
+    expect(formatRoutingDisplay("load-balancing")).toBe("Load balancing");
+    expect(formatRoutingDisplay("latency-based")).toBe("Latency based");
+    expect(formatRoutingDisplay("cost-based")).toBe("Cost based");
+    expect(formatRoutingDisplay("usage-based")).toBe("Usage based");
     expect(formatRoutingDisplay("round-robin")).toBe("Round robin");
     expect(formatRoutingDisplay("fallback-first")).toBe("Fallback first");
     expect(formatRoutingDisplay("")).toBe("Main first");

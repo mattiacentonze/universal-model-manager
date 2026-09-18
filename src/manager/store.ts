@@ -27,16 +27,52 @@ export const UNIFIED_ROUTING_MODES: UnifiedRoutingMode[] = [
   "usage-based",
 ];
 
-export const DEFAULT_UNIFIED_ROUTING_PARAMETERS: UnifiedRoutingParameters = {
-  softQuotaThresholdPercent: 80,
-  proactiveRotationThresholdPercent: 0,
-  switchOnFirstRateLimit: false,
-  maxAccountSwitches: 10,
-  maxCacheFirstWaitSeconds: 60,
-  pidOffsetEnabled: false,
-  latencyWindowMs: 60000,
-  costWindowMs: 86400000,
-};
+export function defaultParametersForMode(mode: UnifiedRoutingMode): UnifiedRoutingParameters {
+  const base: UnifiedRoutingParameters = {
+    softQuotaThresholdPercent: 80,
+    proactiveRotationThresholdPercent: 20,
+    switchOnFirstRateLimit: true,
+    maxAccountSwitches: 10,
+    maxCacheFirstWaitSeconds: 60,
+    pidOffsetEnabled: false,
+    latencyWindowMs: 60000,
+    costWindowMs: 86400000,
+  };
+  switch (mode) {
+    case "main-first":
+      return { ...base, switchOnFirstRateLimit: false, proactiveRotationThresholdPercent: 0 };
+    case "load-balancing":
+      return { ...base, switchOnFirstRateLimit: true, proactiveRotationThresholdPercent: 0 };
+    case "latency-based":
+      return { ...base, switchOnFirstRateLimit: true };
+    case "cost-based":
+      return { ...base, switchOnFirstRateLimit: true };
+    case "usage-based":
+      return { ...base, switchOnFirstRateLimit: true, proactiveRotationThresholdPercent: 20 };
+  }
+}
+
+export function mapLegacyRoutingMode(legacy?: string): UnifiedRoutingMode {
+  switch (legacy) {
+    case "balanced":
+    case "sticky-balanced":
+    case "round-robin":
+      return "load-balancing";
+    case "latency-based":
+      return "latency-based";
+    case "cost-based":
+      return "cost-based";
+    case "usage-based":
+      return "usage-based";
+    case "sticky":
+    case "fallback-first":
+    case "main-first":
+    default:
+      return "main-first";
+  }
+}
+
+export const DEFAULT_UNIFIED_ROUTING_PARAMETERS: UnifiedRoutingParameters = defaultParametersForMode("main-first");
 
 export const DEFAULT_UNIFIED_ROUTING: UnifiedRoutingConfig = {
   mode: "main-first",
@@ -62,6 +98,7 @@ export const DEFAULT_ROUTER: RouterSettings = {
   orchestrator: DEEPSEEK,
   enabled: true,
   routingMode: "main-first",
+  routing: structuredClone(DEFAULT_UNIFIED_ROUTING),
   tiers: {
     fast: { ...DEFAULT_CHAIN, model: DEEPSEEK, fallback: [GEMINI] },
     medium: {
@@ -139,6 +176,25 @@ export function isTierChain(v: unknown): v is TierChain {
   return true;
 }
 
+function isRoutingConfig(v: unknown): v is UnifiedRoutingConfig {
+  if (typeof v !== "object" || v === null) return false;
+  const rc = v as Record<string, unknown>;
+  if (!UNIFIED_ROUTING_MODES.includes(rc.mode as UnifiedRoutingMode)) return false;
+  if (rc.parameters !== undefined) {
+    if (typeof rc.parameters !== "object" || rc.parameters === null) return false;
+    const p = rc.parameters as Record<string, unknown>;
+    if (p.softQuotaThresholdPercent !== undefined && typeof p.softQuotaThresholdPercent !== "number") return false;
+    if (p.proactiveRotationThresholdPercent !== undefined && typeof p.proactiveRotationThresholdPercent !== "number") return false;
+    if (p.switchOnFirstRateLimit !== undefined && typeof p.switchOnFirstRateLimit !== "boolean") return false;
+    if (p.maxAccountSwitches !== undefined && typeof p.maxAccountSwitches !== "number") return false;
+    if (p.maxCacheFirstWaitSeconds !== undefined && typeof p.maxCacheFirstWaitSeconds !== "number") return false;
+    if (p.pidOffsetEnabled !== undefined && typeof p.pidOffsetEnabled !== "boolean") return false;
+    if (p.latencyWindowMs !== undefined && typeof p.latencyWindowMs !== "number") return false;
+    if (p.costWindowMs !== undefined && typeof p.costWindowMs !== "number") return false;
+  }
+  return true;
+}
+
 function isRouter(v: unknown): v is RouterSettings {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Record<string, unknown>;
@@ -147,6 +203,7 @@ function isRouter(v: unknown): v is RouterSettings {
   if (typeof r.enabled !== "boolean") return false;
   if (r.routingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.routingMode))) return false;
   if (r.zenRoutingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.zenRoutingMode))) return false;
+  if (r.routing !== undefined && !isRoutingConfig(r.routing)) return false;
   if (r.orchestratorVariant !== undefined && typeof r.orchestratorVariant !== "string") return false;
   if (r.orchestratorFallbacks !== undefined && (!Array.isArray(r.orchestratorFallbacks) || r.orchestratorFallbacks.some(f => typeof f !== "string"))) return false;
   const t = r.tiers as Record<string, unknown> | undefined;
@@ -198,9 +255,20 @@ export function validateConfig(input: unknown): ManagerConfig {
   }
 
   // Router and wizard must be structurally valid; refuse to silently drop them.
-  const router = raw.router !== undefined ? raw.router : null;
+  const router = raw.router !== undefined ? (raw.router as RouterSettings) : null;
   if (router === null || !isRouter(router)) {
     throw new Error("[Manager] Invalid or missing router settings. Refusing to overwrite user data.");
+  }
+
+  // Automatic migration: populate router.routing from legacy routingMode if missing
+  if (router.routing === undefined) {
+    const mode = mapLegacyRoutingMode(router.routingMode);
+    router.routing = {
+      mode,
+      parameters: defaultParametersForMode(mode),
+    };
+  } else if (!router.routing.parameters) {
+    router.routing.parameters = defaultParametersForMode(router.routing.mode);
   }
   const wizardRaw = raw.wizard;
   if (wizardRaw !== undefined && wizardRaw !== null && !isWizard(wizardRaw)) {

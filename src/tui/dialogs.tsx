@@ -22,7 +22,16 @@ import {
   setMainByManagerId,
   routingModeAction,
 } from "../manager/provider-accounts.js";
-import { completeStep, loadConfig, resetManager, saveConfig, type RouterRoutingMode } from "../manager/index.js";
+import {
+  completeStep,
+  loadConfig,
+  resetManager,
+  saveConfig,
+  syncUnifiedRouting,
+  type RouterRoutingMode,
+  type UnifiedRoutingMode,
+  UNIFIED_ROUTING_MODES,
+} from "../manager/index.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { dispatchNative } from "./native.js";
 import { listChromeProfiles, importFromChromeProfile } from "../chatgpt-web/chrome-importer.js";
@@ -59,13 +68,14 @@ async function applyRpcCommandSilently(provider: "antigravity" | "openai", comma
     if (!portEntry) return;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
+    const effectiveCommand = provider === "antigravity" && command === "google-routing" ? "antigravity-routing" : command;
     await fetch(`http://127.0.0.1:${portEntry.port}/rpc/apply`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${portEntry.token}`,
       },
-      body: JSON.stringify({ command, arguments: args }),
+      body: JSON.stringify({ command: effectiveCommand, arguments: args }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
   } catch {}
@@ -180,7 +190,7 @@ function accountsWizard(api: Api) {
  *  - Antigravity main is written to the real store AND the runtime "current"
  *    command is dispatched via native so the live AccountManager stays in sync.
  */
-export type UnifiedRoutingMode = "main-first" | "sticky-balanced" | "round-robin" | "fallback-first";
+export type { UnifiedRoutingMode };
 
 export const UNIFIED_ROUTING_OPTIONS: Array<{
   title: string;
@@ -190,22 +200,27 @@ export const UNIFIED_ROUTING_OPTIONS: Array<{
   {
     title: "Main first (recommended)",
     value: "main-first",
-    description: "Always retry the primary model/account first; switch to fallbacks only on failure.",
+    description: "Prefer primary model/account, switch only on failure.",
   },
   {
-    title: "Round robin",
-    value: "round-robin",
-    description: "Rotate cyclically across all configured models/accounts in order, distributing traffic evenly.",
+    title: "Load balancing",
+    value: "load-balancing",
+    description: "Distribute requests across accounts evenly.",
   },
   {
-    title: "Fallback first",
-    value: "fallback-first",
-    description: "Use secondary models/accounts first, keeping the primary in reserve.",
+    title: "Latency based",
+    value: "latency-based",
+    description: "Route to lowest-latency account using moving-average telemetry.",
   },
   {
-    title: "Sticky Balanced",
-    value: "sticky-balanced",
-    description: "Pins session to account with most capacity / least usage (LiteLLM session affinity)",
+    title: "Cost based",
+    value: "cost-based",
+    description: "Route to cheapest account based on usage and pricing telemetry.",
+  },
+  {
+    title: "Usage based",
+    value: "usage-based",
+    description: "Route to account with most quota headroom.",
   },
 ];
 
@@ -259,11 +274,8 @@ export function openRoutingSelector(
           value: opt.value,
           description: opt.description,
           onSelect: () => {
-            promptRoutingScope(api, `${title}: ${opt.title}`, (scope) => {
-              if (target === "manager") setRouterRoutingMode(api, opt.value, scope);
-              else if (target === "openai") setOpenAIRoutingMode(api, opt.value, scope);
-              else if (target === "google") setGoogleRoutingMode(api, opt.value, scope);
-              else setOpenCodeZenRoutingMode(api, opt.value, scope);
+            closeDialog(api);
+            void syncUnifiedRouting(api, opt.value).then(() => {
               onDone?.();
             });
           },
@@ -276,6 +288,8 @@ export function openRoutingSelector(
 
 export function getOpenAIRoutingMode(): string {
   try {
+    const c = cfg();
+    if (c.router?.routing?.mode) return c.router.routing.mode;
     const p = join(configDir(), "openai-auth.json");
     if (existsSync(p)) {
       const data = JSON.parse(readFileSync(p, "utf8"));
@@ -286,117 +300,50 @@ export function getOpenAIRoutingMode(): string {
 }
 
 export function setOpenAIRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
-  const nativeMode = mode === ("balanced" as any) ? "sticky-balanced" : mode;
-  if (scope === "all") {
-    try {
-      const p = join(configDir(), "openai-auth.json");
-      let data: any = {};
-      if (existsSync(p)) data = JSON.parse(readFileSync(p, "utf8"));
-      data.routing = { ...data.routing, mode: nativeMode };
-      writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
-    } catch {
-      api.ui.toast({ variant: "error", title: "Error", message: "Failed to update openai-auth.json" });
-      return;
-    }
-  }
-  void applyRpcCommandSilently("openai", "openai-routing", nativeMode);
-  api.ui.toast({
-    variant: "success",
-    title: "OpenAI routing",
-    message: `OpenAI routing set to ${nativeMode} (${scope === "session" ? "current session" : "all sessions"}).`,
-  });
+  void syncUnifiedRouting(api, mode);
 }
 
-export function getGoogleRoutingMode(): UnifiedRoutingMode {
+export function getGoogleRoutingMode(dir = configDir()): UnifiedRoutingMode {
   try {
-    const dir = configDir();
     const p = join(dir, "google.json");
     if (existsSync(p)) {
       const data = JSON.parse(readFileSync(p, "utf8"));
-      const m = data?.account_selection_strategy;
-      if (m === "hybrid" || m === "sticky-balanced" || m === "balanced") return "sticky-balanced";
+      const m = data?.account_selection_strategy || data?.routing_mode;
+      if (m === "round-robin") return "load-balancing";
+      if (m === "hybrid" || m === "sticky-balanced" || m === "balanced") return "load-balancing";
       if (m === "sticky" || m === "main-first") return "main-first";
-      if (m === "round-robin") return "round-robin";
-      if (m === "fallback-first") return "fallback-first";
-      return "main-first";
+      if (UNIFIED_ROUTING_MODES.includes(m)) return m;
     }
+    const agPath = join(dir, "antigravity.json");
+    if (existsSync(agPath)) {
+      const data = JSON.parse(readFileSync(agPath, "utf8"));
+      const m = data?.account_selection_strategy || data?.routing_mode;
+      if (m === "round-robin") return "load-balancing";
+      if (m === "hybrid" || m === "sticky-balanced" || m === "balanced") return "load-balancing";
+      if (m === "sticky" || m === "main-first") return "main-first";
+      if (UNIFIED_ROUTING_MODES.includes(m)) return m;
+    }
+    const c = loadConfig(undefined, dir);
+    if (c.router?.routing?.mode) return c.router.routing.mode;
   } catch {}
   return "main-first";
 }
 
 export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
-  const nativeMode = mode === ("balanced" as any) ? "sticky-balanced" : mode;
-  if (scope === "all") {
-    try {
-      const dir = configDir();
-      const p = join(dir, "google.json");
-      let data: any = {};
-      if (existsSync(p)) data = JSON.parse(readFileSync(p, "utf8"));
-      data.account_selection_strategy = nativeMode;
-      delete data.routing_mode;
-      if (nativeMode === "main-first") {
-        data.scheduling_mode = "cache_first";
-        data.switch_on_first_rate_limit = false;
-      } else if (nativeMode === "fallback-first") {
-        data.scheduling_mode = "balance";
-        data.switch_on_first_rate_limit = true;
-      } else if (nativeMode === "sticky-balanced") {
-        data.scheduling_mode = "balance";
-        data.switch_on_first_rate_limit = true;
-      } else if (nativeMode === "round-robin") {
-        data.scheduling_mode = "performance_first";
-        data.switch_on_first_rate_limit = true;
-      }
-      writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
-    } catch {
-      api.ui.toast({ variant: "error", title: "Error", message: "Failed to update google.json" });
-      return;
-    }
-  }
-  void applyRpcCommandSilently("antigravity", "google-routing", nativeMode);
-  api.ui.toast({
-    variant: "success",
-    title: "Google routing",
-    message: `Google routing set to ${nativeMode} (${scope === "session" ? "current session" : "all sessions"}).`,
-  });
+  void syncUnifiedRouting(api, mode);
 }
 
 export function setOpenCodeZenRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
-  const nativeMode = mode === ("balanced" as any) ? "sticky-balanced" : mode;
-  if (scope === "all") {
-    try {
-      const c = cfg();
-      if (c.router) {
-        c.router.zenRoutingMode = nativeMode;
-        saveConfig(c);
-      }
-    } catch {
-      api.ui.toast({ variant: "error", title: "Error", message: "Failed to update manager.json" });
-      return;
-    }
-  }
-  api.ui.toast({
-    variant: "success",
-    title: "OpenCode Zen routing",
-    message: `OpenCode Zen routing set to ${nativeMode} (${scope === "session" ? "current session" : "all sessions"}).`,
-  });
+  void syncUnifiedRouting(api, mode);
 }
 
-export function setRouterRoutingMode(api: Api, mode: RouterRoutingMode, scope: "session" | "all" = "all") {
-  const unified: UnifiedRoutingMode = (mode === "sticky" ? "main-first" : mode === "balanced" ? "sticky-balanced" : mode) as UnifiedRoutingMode;
-  if (scope === "all") {
-    const c = cfg();
-    c.router.routingMode = unified;
-    saveConfig(c);
-  }
-  try { setOpenAIRoutingMode(api, unified, scope); } catch {}
-  try { setGoogleRoutingMode(api, unified, scope); } catch {}
-  try { setOpenCodeZenRoutingMode(api, unified, scope); } catch {}
-  api.ui.toast({
-    variant: "success",
-    title: "Model Manager routing",
-    message: `Routing mode set to ${unified} (${scope === "session" ? "current session" : "all sessions"}). ${scope === "all" ? RESTART : ""}`.trim(),
-  });
+export function setRouterRoutingMode(api: Api, mode: RouterRoutingMode | UnifiedRoutingMode, scope: "session" | "all" = "all") {
+  const unified: UnifiedRoutingMode = (
+    mode === "sticky" ? "main-first" :
+    mode === "balanced" || mode === "sticky-balanced" || mode === "round-robin" ? "load-balancing" :
+    mode
+  ) as UnifiedRoutingMode;
+  void syncUnifiedRouting(api, unified);
 }
 
 /**

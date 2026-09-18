@@ -1,6 +1,7 @@
 // @ts-nocheck
 // Vendored from opencode-runtime-fallback 0.2.4 (MIT). Self-contained engine.
 // @bun
+import { telemetry } from "../telemetry/index.js";
 // constants.ts
 var PLUGIN_NAME = "opencode-fallback";
 var DEFAULT_CONFIG = {
@@ -159,8 +160,8 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
     return undefined;
   };
   const start = state.fallbackIndex + 1;
-  if (routingMode === "balanced" || routingMode === "sticky-balanced") {
-    // Balanced mode: pick the healthiest available candidate not in cooldown.
+  if (routingMode === "balanced" || routingMode === "sticky-balanced" || routingMode === "load-balancing" || routingMode === "usage-based") {
+    // Balanced / load-balancing / usage-based: pick the healthiest available candidate not in cooldown.
     // Prefers models that haven't failed yet in this session; among failed models,
     // prefers the one whose failure was furthest in the past (most recovery time).
     const available = [];
@@ -176,6 +177,48 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
       available.sort((a, b) => {
         if (a.lastFailed === 0 && b.lastFailed > 0) return -1;
         if (a.lastFailed > 0 && b.lastFailed === 0) return 1;
+        if (a.lastFailed !== b.lastFailed) return a.lastFailed - b.lastFailed;
+        return a.index - b.index;
+      });
+      return available[0].candidate;
+    }
+    return undefined;
+  }
+  if (routingMode === "latency-based") {
+    const available = [];
+    for (let i = 0; i < fallbackModels.length; i++) {
+      const candidate = fallbackModels[i];
+      if (candidate === state.currentModel) continue;
+      if (!isModelInCooldown(candidate, state, cooldownSeconds)) {
+        const avgLat = telemetry.latency.getAverageLatency(candidate) || 999999;
+        const lastFailed = state.failedModels.get(candidate) ?? 0;
+        available.push({ candidate, avgLat, lastFailed, index: i });
+      }
+    }
+    if (available.length > 0) {
+      available.sort((a, b) => {
+        if (a.avgLat !== b.avgLat) return a.avgLat - b.avgLat;
+        if (a.lastFailed !== b.lastFailed) return a.lastFailed - b.lastFailed;
+        return a.index - b.index;
+      });
+      return available[0].candidate;
+    }
+    return undefined;
+  }
+  if (routingMode === "cost-based") {
+    const available = [];
+    for (let i = 0; i < fallbackModels.length; i++) {
+      const candidate = fallbackModels[i];
+      if (candidate === state.currentModel) continue;
+      if (!isModelInCooldown(candidate, state, cooldownSeconds)) {
+        const cost = telemetry.cost.getAccumulatedCost(candidate);
+        const lastFailed = state.failedModels.get(candidate) ?? 0;
+        available.push({ candidate, cost, lastFailed, index: i });
+      }
+    }
+    if (available.length > 0) {
+      available.sort((a, b) => {
+        if (a.cost !== b.cost) return a.cost - b.cost;
         if (a.lastFailed !== b.lastFailed) return a.lastFailed - b.lastFailed;
         return a.index - b.index;
       });

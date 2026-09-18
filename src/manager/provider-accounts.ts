@@ -194,7 +194,7 @@ export function getOpenAIAccounts(configDir = getOpenCodeConfigDir()): ProviderA
  */
 export function routingModeAction(mode: RoutingMode, provider: "openai" | "antigravity" = "openai"): NativeAction {
   const action = loginActionFor(provider);
-  const cmd = provider === "antigravity" ? "/google-routing" : "/openai-routing";
+  const cmd = provider === "antigravity" ? "/antigravity-routing" : "/openai-routing";
   const name = provider === "antigravity" ? "Google Antigravity" : "OpenAI";
   return { ...action, kind: "set-routing", command: cmd, arguments: mode, cli: { command: "", args: [] }, text: `Set ${name} routing to ${mode}.` };
 }

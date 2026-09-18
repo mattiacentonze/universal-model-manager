@@ -403,6 +403,38 @@ describe("fallback engine routing modes", () => {
     expect(replayed.length).toBe(3);
     expect(replayed[2].providerID).toBe("openai");
   });
+
+  it("load-balancing and usage-based pick healthiest available candidate", async () => {
+    const replayed: any[] = [];
+    const hooks = await boot(replayed, "load-balancing");
+
+    // Primary fails -> moves to gemini
+    await hooks.event!(err(CHAIN[0]));
+    expect(replayed.length).toBe(1);
+    expect(replayed[0].providerID).toBe("google");
+    await complete(hooks, CHAIN[1]);
+
+    // Gemini fails -> moves to big-pickle
+    await hooks.event!(err(CHAIN[1]));
+    expect(replayed.length).toBe(2);
+    expect(replayed[1].providerID).toBe("opencode");
+  });
+
+  it("latency-based routes to candidate with lowest measured latency", async () => {
+    const { telemetry } = await import("../src/telemetry/index.js");
+    telemetry.latency.clear();
+    // Record latencies: gemini 50ms, big-pickle 10ms
+    telemetry.latency.recordLatency(CHAIN[1], 50);
+    telemetry.latency.recordLatency(CHAIN[2], 10);
+
+    const replayed: any[] = [];
+    const hooks = await boot(replayed, "latency-based");
+
+    // Primary fails -> picks big-pickle (CHAIN[2]) because it has lower latency than gemini (CHAIN[1])
+    await hooks.event!(err(CHAIN[0]));
+    expect(replayed.length).toBe(1);
+    expect(replayed[0].providerID).toBe("opencode");
+  });
 });
 
 describe("fallback engine stay-on-fallback retry cap", () => {
