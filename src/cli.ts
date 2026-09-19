@@ -113,11 +113,10 @@ Usage:
       );
       process.exit(1);
     }
-    const cfg = resetManager();
+    resetManager();
     console.log(
       `[Manager] Manager config & wizard reset. Config written to ${getOpenCodeConfigDir()}/universal-auth/manager.json. Credentials untouched.`,
     );
-    void cfg;
     return;
   }
 
@@ -181,7 +180,6 @@ Usage:
   }
 
   if (command === "router") {
-    const _cfg = loadConfig();
     const setIdx = args.indexOf("set");
     if (setIdx !== -1) {
       const tier = args[setIdx + 1];
@@ -236,16 +234,7 @@ Usage:
     console.log(`=== Unified Model Manager (${PLUGIN_ID}) ===`);
     const configFile = findOpenCodeConfigFile();
     console.log(`OpenCode Config: ${configFile} (${existsSync(configFile) ? "EXISTS" : "MISSING"})`);
-    const cfg = loadConfig();
-    for (const a of cfg.accounts) {
-      console.log(`  ${a.id} [${a.kind}]${a.main ? " (main)" : ""}: ${a.configured ? "ready" : "pending"}`);
-    }
-    for (const t of ["fast", "medium", "heavy"] as const) {
-      const c = cfg.router.tiers[t];
-      console.log(`  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${c.fallback.join(", ") || "-"}`);
-    }
-    const next = firstMissingStep(cfg);
-    console.log(`Wizard: ${next === null ? "complete" : `resume at ${next}`}`);
+    printAccountSummary();
     const sessionStore = new SessionStore();
     console.log(`ChatGPT Web: ${sessionStore.hasValidSession() ? "LOGGED IN" : "NOT LOGGED IN"}`);
     return;

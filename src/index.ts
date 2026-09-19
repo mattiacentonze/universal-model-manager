@@ -46,5 +46,4 @@ export { composeHooks } from "./hooks/compose.js";
 export * from "./manager/index.js";
 export { openaiServerPlugin, openaiServerPlugin as openaiAuth } from "./openai/index.js";
 export { opencodeZenServerPlugin, zenUsageTracker } from "./opencode-zen/index.js";
-export { managerRouterHooks } from "./router/index.js";
 export { ANTIGRAVITY_ENTRY, PLUGIN_ALIASES, PLUGIN_ID } from "./shared/constants.js";
