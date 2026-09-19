@@ -1,12 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import {
-  detectLegacyPluginsAndConfigs,
-  formatDiscoveryReport,
-  executeMigration,
-} from "../src/migration/index.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { detectLegacyPluginsAndConfigs, executeMigration, formatDiscoveryReport } from "../src/migration/index.js";
 
 describe("Migration Engine", () => {
   it("detects legacy cortexkit, fallback, and codex-chatgpt-web configurations", () => {
@@ -24,23 +20,20 @@ describe("Migration Engine", () => {
           "@cortexkit/opencode-antigravity-auth",
           "opencode-runtime-fallback",
         ],
-      })
+      }),
     );
 
     // 2. Create dummy openai-auth.json and state
     writeFileSync(
       join(tempConfigDir, "openai-auth.json"),
-      JSON.stringify({ mainAccountId: "test-openai-id", accounts: [{ id: "test" }] })
+      JSON.stringify({ mainAccountId: "test-openai-id", accounts: [{ id: "test" }] }),
     );
-    writeFileSync(
-      join(tempConfigDir, "openai-auth-state.json"),
-      JSON.stringify({ access_token: "secret-token" })
-    );
+    writeFileSync(join(tempConfigDir, "openai-auth-state.json"), JSON.stringify({ access_token: "secret-token" }));
 
     // 3. Create dummy antigravity-accounts.json
     writeFileSync(
       join(tempConfigDir, "antigravity-accounts.json"),
-      JSON.stringify([{ email: "test@google.com", refresh_token: "google-secret" }])
+      JSON.stringify([{ email: "test@google.com", refresh_token: "google-secret" }]),
     );
 
     // 4. Create dummy codex-chatgpt-web storage-state
@@ -48,7 +41,7 @@ describe("Migration Engine", () => {
     mkdirSync(codexWebDir, { recursive: true });
     writeFileSync(
       join(codexWebDir, "storage-state.json"),
-      JSON.stringify({ cookies: [{ name: "session", value: "chatgpt-cookie", domain: "chatgpt.com" }] })
+      JSON.stringify({ cookies: [{ name: "session", value: "chatgpt-cookie", domain: "chatgpt.com" }] }),
     );
 
     const report = detectLegacyPluginsAndConfigs({
@@ -60,7 +53,7 @@ describe("Migration Engine", () => {
     expect(report.hasConflictsWithUniversalManager).toBe(true);
     expect(report.conflictSummary.length).toBe(3);
 
-    const itemIds = report.items.map(i => i.id);
+    const itemIds = report.items.map((i) => i.id);
     expect(itemIds).toContain("cortexkit-openai");
     expect(itemIds).toContain("cortexkit-antigravity");
     expect(itemIds).toContain("runtime-fallback");
@@ -83,7 +76,7 @@ describe("Migration Engine", () => {
         replaceInTuiConfig: false,
         uninstallLegacyNpmPackages: false,
       },
-      { configDir: tempConfigDir, homeDir: tempHome }
+      { configDir: tempConfigDir, homeDir: tempHome },
     );
 
     expect(result.success).toBe(true);

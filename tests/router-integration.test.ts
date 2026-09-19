@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { countRealAccounts, providerConfigured, reconcileConfigured } from "../src/manager/auth-status.js";
+import { ensureSingleMain, handleManagerCommand, summarize } from "../src/manager/commands.js";
 import { emptyConfig } from "../src/manager/store.js";
-import { handleManagerCommand, summarize, ensureSingleMain } from "../src/manager/commands.js";
-import { remainingSteps, tierVariantOptions, missingTiers } from "../src/tui/wizard-core.js";
+import { missingTiers, remainingSteps, tierVariantOptions } from "../src/tui/wizard-core.js";
 
 function fakeConfigDir(): string {
   return mkdtempSync(join(tmpdir(), "uaconf-"));
@@ -25,9 +25,20 @@ describe("Real underlying provider auth status", () => {
 
   it("derives configured from real credentialed accounts in the CortexKit stores", () => {
     const dir = fakeConfigDir();
-    writeFileSync(join(dir, "openai-auth.json"), JSON.stringify({ version: 1, main: { type: "opencode", provider: "openai" }, mainAccountId: "x", accounts: [{ id: "x", accountId: "x", type: "oauth", enabled: true }] }));
+    writeFileSync(
+      join(dir, "openai-auth.json"),
+      JSON.stringify({
+        version: 1,
+        main: { type: "opencode", provider: "openai" },
+        mainAccountId: "x",
+        accounts: [{ id: "x", accountId: "x", type: "oauth", enabled: true }],
+      }),
+    );
     // Credentials live in the separate state store, NOT in the config file.
-    writeFileSync(join(dir, "openai-auth-state.json"), JSON.stringify({ version: 1, accounts: { x: { refresh: "rt", expires: 4_100_000_000_000 } } }));
+    writeFileSync(
+      join(dir, "openai-auth-state.json"),
+      JSON.stringify({ version: 1, accounts: { x: { refresh: "rt", expires: 4_100_000_000_000 } } }),
+    );
     expect(providerConfigured("openai", dir)).toBe(true);
     expect(countRealAccounts("openai", dir)).toBe(1);
     // Missing antigravity store remains unconfigured.
@@ -38,10 +49,14 @@ describe("Real underlying provider auth status", () => {
     const dir = fakeConfigDir();
     writeFileSync(
       join(dir, "openai-auth.json"),
-      JSON.stringify({ version: 1, main: { type: "opencode", provider: "openai" }, accounts: [
-        { id: "api", type: "api", baseURL: "https://x", apiKey: "k" },
-        { id: "off", type: "oauth", enabled: false },
-      ] })
+      JSON.stringify({
+        version: 1,
+        main: { type: "opencode", provider: "openai" },
+        accounts: [
+          { id: "api", type: "api", baseURL: "https://x", apiKey: "k" },
+          { id: "off", type: "oauth", enabled: false },
+        ],
+      }),
     );
     // No credential store, and the only oauth account is disabled.
     expect(countRealAccounts("openai", dir)).toBe(0);
@@ -49,11 +64,18 @@ describe("Real underlying provider auth status", () => {
 
   it("reconcileConfigured mirrors real status onto manager entries", () => {
     const dir = fakeConfigDir();
-    writeFileSync(join(dir, "antigravity-accounts.json"), JSON.stringify({ version: 4, activeIndex: 0, accounts: [{ email: "g@x", refreshToken: "rt", addedAt: 1, lastUsed: 1, enabled: true }] }));
+    writeFileSync(
+      join(dir, "antigravity-accounts.json"),
+      JSON.stringify({
+        version: 4,
+        activeIndex: 0,
+        accounts: [{ email: "g@x", refreshToken: "rt", addedAt: 1, lastUsed: 1, enabled: true }],
+      }),
+    );
     const cfg = emptyConfig();
     const out = reconcileConfigured(cfg.accounts, dir);
-    expect(out.find(a => a.kind === "openai")).toBeUndefined(); // no real openai account
-    expect(out.find(a => a.kind === "antigravity")?.configured).toBe(true);
+    expect(out.find((a) => a.kind === "openai")).toBeUndefined(); // no real openai account
+    expect(out.find((a) => a.kind === "antigravity")?.configured).toBe(true);
   });
 });
 
@@ -68,7 +90,12 @@ describe("Command handler: real account & router actions", () => {
 
   it("/u-router tier sets model, variant and fallback chain", async () => {
     const cfgDir = fakeConfigDir();
-    const res = await handleManagerCommand("u-router", "tier medium openai/gpt-6-astra high google/antigravity-gemini-3.8-flash,iit/deepseek-v4-flash", fakeDataDir(), cfgDir);
+    const res = await handleManagerCommand(
+      "u-router",
+      "tier medium openai/gpt-6-astra high google/antigravity-gemini-3.8-flash,iit/deepseek-v4-flash",
+      fakeDataDir(),
+      cfgDir,
+    );
     expect(res?.text).toContain("medium chain set to openai/gpt-6-astra");
   });
 
@@ -81,10 +108,10 @@ describe("Command handler: real account & router actions", () => {
 
   it("ensureSingleMain keeps exactly one main per provider", () => {
     const cfg = emptyConfig();
-    const mixed = cfg.accounts.map(a => ({ ...a, main: true }));
+    const mixed = cfg.accounts.map((a) => ({ ...a, main: true }));
     const out = ensureSingleMain(mixed);
-    expect(out.filter(a => a.kind === "openai" && a.main)).toHaveLength(1);
-    expect(out.filter(a => a.kind === "antigravity" && a.main)).toHaveLength(1);
+    expect(out.filter((a) => a.kind === "openai" && a.main)).toHaveLength(1);
+    expect(out.filter((a) => a.kind === "antigravity" && a.main)).toHaveLength(1);
   });
 });
 
@@ -99,7 +126,14 @@ describe("TUI wizard core (API contract)", () => {
 
   it("remainingSteps is empty only when every step is confirmed and valid", () => {
     const cfgDir = fakeConfigDir();
-    writeFileSync(join(cfgDir, "antigravity-accounts.json"), JSON.stringify({ version: 4, activeIndex: 0, accounts: [{ email: "g@x", refreshToken: "rt", addedAt: 1, lastUsed: 1, enabled: true }] }));
+    writeFileSync(
+      join(cfgDir, "antigravity-accounts.json"),
+      JSON.stringify({
+        version: 4,
+        activeIndex: 0,
+        accounts: [{ email: "g@x", refreshToken: "rt", addedAt: 1, lastUsed: 1, enabled: true }],
+      }),
+    );
     const cfg = emptyConfig();
     // Confirm accounts via skip-auth (external provider, no local creds needed),
     // confirm each tier and the router, then nothing is missing.
@@ -136,8 +170,8 @@ describe("TUI wizard core (API contract)", () => {
   it("tierVariantOptions offers default first, then only catalog-known variants", () => {
     const opts = tierVariantOptions("openai/gpt-6-astra", ["medium", "high"]);
     expect(opts[0].value).toBeUndefined();
-    expect(opts.map(o => o.value)).toContain("medium");
-    expect(opts.map(o => o.value)).toContain("high");
+    expect(opts.map((o) => o.value)).toContain("medium");
+    expect(opts.map((o) => o.value)).toContain("high");
   });
 
   it("summarize renders real configured status", () => {

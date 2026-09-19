@@ -16,21 +16,18 @@
 import { exec as nodeExec } from "node:child_process";
 import { access, readFile as fsReadFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { createMutexRegistry } from "./deterministic.js";
-import { tierModel } from "./dispatch.js";
-import {
-  DEFAULT_GRADER_PROMPT_TIMEOUT_MS,
-  timeoutMs,
-  withTimeout,
-} from "./timeout.js";
 import type { RouterConfig } from "../router/config.js";
-import type { GateDeps } from "./gate.js";
 // The grader request shape is owned by checker.ts, which builds it. Re-exported
 // here because this module is where it is consumed, and because keeping a
 // second local copy is exactly how `cwd` got dropped: the checker set it, the
 // wiring's narrower structural type silently discarded it, and the grader ran
 // against the router's directory while claiming to check the producer's.
 import type { GraderRequest } from "./checker.js";
+import { createMutexRegistry } from "./deterministic.js";
+import { tierModel } from "./dispatch.js";
+import type { GateDeps } from "./gate.js";
+import { DEFAULT_GRADER_PROMPT_TIMEOUT_MS, timeoutMs, withTimeout } from "./timeout.js";
+
 export type { GraderRequest };
 
 /**
@@ -95,10 +92,7 @@ export function createVerificationWiring(deps: {
   const disposed = new Set<string>();
   const mutex = createMutexRegistry();
 
-  const execSeam = (
-    command: string,
-    opts?: { cwd?: string; timeoutMs?: number },
-  ): Promise<ExecResult> =>
+  const execSeam = (command: string, opts?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult> =>
     new Promise((resolve) => {
       try {
         nodeExec(
@@ -110,9 +104,8 @@ export function createVerificationWiring(deps: {
             windowsHide: true,
           },
           (err: any, stdout: any, stderr: any) => {
-            const timedOut = !!(err && err.killed && err.signal === "SIGTERM");
-            const code =
-              err && typeof err.code === "number" ? err.code : err ? 1 : 0;
+            const timedOut = !!(err?.killed && err.signal === "SIGTERM");
+            const code = err && typeof err.code === "number" ? err.code : err ? 1 : 0;
             resolve({
               code,
               stdout: String(stdout ?? ""),
@@ -222,10 +215,7 @@ export function createVerificationWiring(deps: {
             parts: [{ type: "text", text: req.prompt }],
           },
         }),
-        timeoutMs(
-          cfg.enforcement?.verify?.graderTimeoutMs,
-          DEFAULT_GRADER_PROMPT_TIMEOUT_MS,
-        ),
+        timeoutMs(cfg.enforcement?.verify?.graderTimeoutMs, DEFAULT_GRADER_PROMPT_TIMEOUT_MS),
         "grader prompt",
       );
       return { sessionID: sid, text: extractAssistantText(res) };
@@ -236,10 +226,7 @@ export function createVerificationWiring(deps: {
     }
   };
 
-  const buildGateDeps = (
-    parentSessionID?: string,
-    inFlight?: Set<string>,
-  ): GateDeps => {
+  const buildGateDeps = (parentSessionID?: string, inFlight?: Set<string>): GateDeps => {
     const cfg = getConfig();
     return {
       deterministic: {
@@ -249,8 +236,7 @@ export function createVerificationWiring(deps: {
         mutex,
       },
       checker: {
-        dispatchGrader: (req: GraderRequest) =>
-          dispatchGrader(req, parentSessionID, inFlight),
+        dispatchGrader: (req: GraderRequest) => dispatchGrader(req, parentSessionID, inFlight),
         ladder: ["fast", "medium", "heavy"],
         minGraderTier: cfg.enforcement?.verify?.minGraderTier ?? null,
       },

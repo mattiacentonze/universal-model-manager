@@ -25,10 +25,7 @@ export abstract class WindowedTracker<
     this.clock = options.clock ?? (() => Date.now());
   }
 
-  public getOrCreateAccount(
-    accountId: string | number,
-    now = this.clock()
-  ): { state: TState; isNew: boolean } {
+  public getOrCreateAccount(accountId: string | number, now = this.clock()): { state: TState; isNew: boolean } {
     const key = String(accountId);
     let state = this.accounts.get(key);
     let isNew = false;
@@ -44,11 +41,7 @@ export abstract class WindowedTracker<
     return this.accounts.get(String(accountId));
   }
 
-  public addRecord(
-    accountId: string | number,
-    record: TRecord,
-    now = this.clock()
-  ): TState {
+  public addRecord(accountId: string | number, record: TRecord, now = this.clock()): TState {
     const { state, isNew } = this.getOrCreateAccount(accountId, now);
     this.onBeforeAddRecord(state, record, isNew, now);
     state.records.push(record);
@@ -68,23 +61,15 @@ export abstract class WindowedTracker<
     this.accounts.clear();
   }
 
-  public rankAccounts(
-    accountIds: Array<string | number>,
-    scoreFn: (accountId: string) => number
-  ): string[] {
-    const list = accountIds.map(id => String(id));
+  public rankAccounts(accountIds: Array<string | number>, scoreFn: (accountId: string) => number): string[] {
+    const list = accountIds.map((id) => String(id));
     return [...list].sort((a, b) => scoreFn(a) - scoreFn(b));
   }
 
   protected abstract createInitialState(accountId: string, now: number): TState;
 
   // Lifecycle hooks for tracker-specific aggregation logic
-  protected onBeforeAddRecord(
-    _state: TState,
-    _record: TRecord,
-    _isNew: boolean,
-    _now: number
-  ): void {}
+  protected onBeforeAddRecord(_state: TState, _record: TRecord, _isNew: boolean, _now: number): void {}
 
   protected onAfterPrune(_state: TState, _now: number): void {}
 }

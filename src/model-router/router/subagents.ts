@@ -50,7 +50,7 @@ export function resolveSubagentOverrides(input: {
     if (agentName === "") continue;
 
     // Never rewrite the plugin's own tier agents.
-    if (Object.prototype.hasOwnProperty.call(tiers, agentName)) continue;
+    if (Object.hasOwn(tiers, agentName)) continue;
 
     const tier = tiers[tierName];
     if (!tier || typeof tier.model !== "string" || tier.model === "") continue;
@@ -73,10 +73,7 @@ export function resolveSubagentOverrides(input: {
  * a variant clears one left behind by a previous preset instead of inheriting
  * it. Every other field on the entry is preserved.
  */
-export function mergeSubagentOverride(
-  existing: unknown,
-  override: SubagentOverride,
-): Record<string, unknown> {
+export function mergeSubagentOverride(existing: unknown, override: SubagentOverride): Record<string, unknown> {
   const base = isPlainObject(existing) ? { ...existing } : {};
   base.model = override.model;
   if (override.variant) base.variant = override.variant;

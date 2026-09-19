@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SessionStore, type StorageState } from "./session-store.js";
 import { logger } from "../shared/logger.js";
+import { SessionStore, type StorageState } from "./session-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +38,7 @@ export function listChromeProfiles(): ChromeProfileItem[] {
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    if (!raw || !raw.trim()) return [];
+    if (!raw?.trim()) return [];
     const parsed = JSON.parse(raw.trim());
     return Array.isArray(parsed.profiles) ? parsed.profiles : [];
   } catch (err) {
@@ -47,7 +47,10 @@ export function listChromeProfiles(): ChromeProfileItem[] {
   }
 }
 
-export function importFromChromeProfile(profileFolder = "Default", sessionStore = new SessionStore()): { ok: boolean; profile?: ChromeProfileItem; error?: string } {
+export function importFromChromeProfile(
+  profileFolder = "Default",
+  sessionStore = new SessionStore(),
+): { ok: boolean; profile?: ChromeProfileItem; error?: string } {
   const script = getScriptPath();
   if (!existsSync(script)) {
     return { ok: false, error: "Extractor script not found" };
@@ -56,11 +59,12 @@ export function importFromChromeProfile(profileFolder = "Default", sessionStore 
   // Find profile metadata
   const profiles = listChromeProfiles();
   const matched = profiles.find(
-    p => p.folder.toLowerCase() === profileFolder.toLowerCase() ||
-         p.name.toLowerCase() === profileFolder.toLowerCase() ||
-         p.email.toLowerCase() === profileFolder.toLowerCase() ||
-         (profileFolder === "iit" && p.email.includes("iit.it")) ||
-         (profileFolder === "personal" && (p.email.includes("gmail") || p.folder === "Default"))
+    (p) =>
+      p.folder.toLowerCase() === profileFolder.toLowerCase() ||
+      p.name.toLowerCase() === profileFolder.toLowerCase() ||
+      p.email.toLowerCase() === profileFolder.toLowerCase() ||
+      (profileFolder === "iit" && p.email.includes("iit.it")) ||
+      (profileFolder === "personal" && (p.email.includes("gmail") || p.folder === "Default")),
   );
 
   const targetFolder = matched ? matched.folder : profileFolder;
@@ -72,7 +76,7 @@ export function importFromChromeProfile(profileFolder = "Default", sessionStore 
       stdio: ["ignore", "pipe", "ignore"],
     });
 
-    if (!raw || !raw.trim()) return { ok: false, error: `No cookies returned for ${targetFolder}` };
+    if (!raw?.trim()) return { ok: false, error: `No cookies returned for ${targetFolder}` };
     const parsed = JSON.parse(raw.trim()) as StorageState;
     if (!Array.isArray(parsed.cookies) || parsed.cookies.length === 0) {
       return { ok: false, error: `Profile ${targetFolder} has no cookies` };

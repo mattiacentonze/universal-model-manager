@@ -1,15 +1,15 @@
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadConfig, saveConfig, syncUnifiedRouting } from "../src/manager/index.js";
 import {
   getGoogleRoutingMode,
-  setGoogleRoutingMode,
   openRoutingSelector,
   promptRoutingScope,
+  setGoogleRoutingMode,
 } from "../src/tui/dialogs.js";
-import { gatherSidebarData, formatRoutingDisplay } from "../src/tui/sidebar-widget.js";
-import { loadConfig, saveConfig, syncUnifiedRouting, translateToProvider } from "../src/manager/index.js";
+import { formatRoutingDisplay, gatherSidebarData } from "../src/tui/sidebar-widget.js";
 import { writeProviderCreds } from "./helpers.js";
 
 type DialogOpt = { title?: string; value: string; onSelect?: () => void; description?: string };
@@ -31,10 +31,14 @@ interface Harness {
 function makeApi(): Harness {
   let last: AnyDialog | null = null;
   const command = vi.fn(async () => ({}));
-  const setState = (render: () => unknown) => { last = render() as AnyDialog; };
+  const setState = (render: () => unknown) => {
+    last = render() as AnyDialog;
+  };
   const api = {
     route: {
-      get current() { return { name: "session", params: { sessionID: "s1" } }; },
+      get current() {
+        return { name: "session", params: { sessionID: "s1" } };
+      },
       register: vi.fn(),
       navigate: vi.fn(),
     },
@@ -42,11 +46,32 @@ function makeApi(): Harness {
     state: { provider: [] as never[] },
     slots: { register: vi.fn() },
     ui: {
-      dialog: { replace: setState, clear: () => { last = null; }, setSize: vi.fn(), size: "xlarge", depth: 1, open: true },
-      DialogSelect: (p: AnyDialog) => { last = p; return p; },
-      DialogPrompt: (p: AnyDialog) => { last = p; return p; },
-      DialogConfirm: (p: AnyDialog) => { last = p; return p; },
-      DialogAlert: (p: AnyDialog) => { last = p; return p; },
+      dialog: {
+        replace: setState,
+        clear: () => {
+          last = null;
+        },
+        setSize: vi.fn(),
+        size: "xlarge",
+        depth: 1,
+        open: true,
+      },
+      DialogSelect: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
+      DialogPrompt: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
+      DialogConfirm: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
+      DialogAlert: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
       toast: vi.fn(),
     },
   };
@@ -54,7 +79,7 @@ function makeApi(): Harness {
     api,
     command,
     last: () => last,
-    find: (value: string) => last?.options?.find(o => o.value === value),
+    find: (value: string) => last?.options?.find((o) => o.value === value),
   };
 }
 
@@ -97,7 +122,7 @@ describe("routing flow with unified 5 modes", () => {
     setGoogleRoutingMode(h.api as never, "load-balancing", "all");
 
     // Wait a tick for async write
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
 
     const saved = JSON.parse(readFileSync(join(cfgDir, "google.json"), "utf8"));
     expect(saved.account_selection_strategy).toBe("round-robin");
@@ -133,7 +158,7 @@ describe("routing flow with unified 5 modes", () => {
     openRoutingSelector(h.api as never, "google");
     const back = h.find("__back");
     expect(back).toBeTruthy();
-    back!.onSelect!();
+    back?.onSelect?.();
     expect(h.last()).toBeNull();
   });
 
@@ -144,9 +169,9 @@ describe("routing flow with unified 5 modes", () => {
     openRoutingSelector(h.api as never, "google");
     const mode = h.find("load-balancing");
     expect(mode).toBeTruthy();
-    mode!.onSelect!();
+    mode?.onSelect?.();
 
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50));
     expect(h.last()).toBeNull();
   });
 
@@ -156,7 +181,7 @@ describe("routing flow with unified 5 modes", () => {
     promptRoutingScope(h.api as never, "Google routing", onScope);
     const scopeSession = h.find("session");
     expect(scopeSession).toBeTruthy();
-    scopeSession!.onSelect!();
+    scopeSession?.onSelect?.();
     expect(onScope).toHaveBeenCalledWith("session");
     expect(h.last()).toBeNull();
   });

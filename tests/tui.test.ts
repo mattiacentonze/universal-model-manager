@@ -2,26 +2,32 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { openWizard, accountsSettings, routerSettings, showReset, openRoutingSelector, UNIFIED_ROUTING_OPTIONS } from "../src/tui/dialogs.js";
-import tuiDefault from "../src/tui.js";
 import { loadConfig, saveConfig } from "../src/manager/index.js";
-import { writeProviderCreds } from "./helpers.js";
-import { nextMissingStep, formatCleanModelName } from "../src/tui/wizard-core.js";
 import {
+  accountsSettings,
+  openRoutingSelector,
+  openWizard,
+  routerSettings,
+  showReset,
+  UNIFIED_ROUTING_OPTIONS,
+} from "../src/tui/dialogs.js";
+import {
+  antigravityCollapsed,
+  formatRoutingDisplay,
   gatherSidebarData,
-  toggleManager,
-  toggleOpenai,
-  toggleAntigravity,
-  toggleZen,
   managerCollapsed,
   openaiCollapsed,
-  antigravityCollapsed,
-  zenCollapsed,
   readPreferences,
   savePreference,
-  formatRoutingDisplay,
-  ModelManagerSidebar,
+  toggleAntigravity,
+  toggleManager,
+  toggleOpenai,
+  toggleZen,
+  zenCollapsed,
 } from "../src/tui/sidebar-widget.js";
+import { formatCleanModelName, nextMissingStep } from "../src/tui/wizard-core.js";
+import tuiDefault from "../src/tui.js";
+import { writeProviderCreds } from "./helpers.js";
 
 type DialogOpt = { title?: string; value: string; onSelect?: () => void; description?: string };
 type AnyDialog = {
@@ -44,10 +50,14 @@ function makeApi(): Harness {
   let last: AnyDialog | null = null;
   let routeCurrent: unknown = { name: "home" };
   const command = vi.fn(async () => ({}));
-  const setState = (render: () => unknown) => { last = render() as AnyDialog; };
+  const setState = (render: () => unknown) => {
+    last = render() as AnyDialog;
+  };
   const api = {
     route: {
-      get current() { return routeCurrent; },
+      get current() {
+        return routeCurrent;
+      },
       register: vi.fn(),
       navigate: vi.fn(),
     },
@@ -55,11 +65,32 @@ function makeApi(): Harness {
     state: { provider: [] as never[] },
     slots: { register: vi.fn() },
     ui: {
-      dialog: { replace: setState, clear: () => { last = null; }, setSize: vi.fn(), size: "medium", depth: 1, open: true },
-      DialogSelect: (p: AnyDialog) => { last = p; return p; },
-      DialogPrompt: (p: AnyDialog) => { last = p; return p; },
-      DialogConfirm: (p: AnyDialog) => { last = p; return p; },
-      DialogAlert: (p: AnyDialog) => { last = p; return p; },
+      dialog: {
+        replace: setState,
+        clear: () => {
+          last = null;
+        },
+        setSize: vi.fn(),
+        size: "medium",
+        depth: 1,
+        open: true,
+      },
+      DialogSelect: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
+      DialogPrompt: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
+      DialogConfirm: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
+      DialogAlert: (p: AnyDialog) => {
+        last = p;
+        return p;
+      },
       toast: vi.fn(),
     },
   };
@@ -67,8 +98,10 @@ function makeApi(): Harness {
     api,
     command,
     last: () => last,
-    find: (value: string) => last?.options?.find(o => o.value === value),
-    setRoute: (cur: unknown) => { routeCurrent = cur; },
+    find: (value: string) => last?.options?.find((o) => o.value === value),
+    setRoute: (cur: unknown) => {
+      routeCurrent = cur;
+    },
   };
 }
 
@@ -85,23 +118,38 @@ describe("TUI wizard + native dispatch", () => {
   it("registers slash commands with a proper `slash` property", async () => {
     const h = makeApi();
     let commands: unknown[] = [];
-    const api2 = { ...h.api, command: { register: (cb: () => unknown[]) => { commands = cb(); } } };
+    const api2 = {
+      ...h.api,
+      command: {
+        register: (cb: () => unknown[]) => {
+          commands = cb();
+        },
+      },
+    };
     await tuiDefault.tui(api2 as never, undefined, undefined as never);
     const slashNames = (commands as Array<{ slash?: { name: string } }>)
-      .filter(e => e.slash)
-      .map(e => e.slash!.name);
+      .filter((e) => e.slash)
+      .map((e) => e.slash?.name);
     expect(slashNames).toEqual(expect.arrayContaining(["fallback-list", "accounts", "setup", "reset"]));
   });
 
   it("/u-setup slash callback opens the Provider accounts wizard dialog, not a toast", async () => {
     const h = makeApi();
     let commands: unknown[] = [];
-    const api2 = { ...h.api, command: { register: (cb: () => unknown[]) => { commands = cb(); } } };
+    const api2 = {
+      ...h.api,
+      command: {
+        register: (cb: () => unknown[]) => {
+          commands = cb();
+        },
+      },
+    };
     await tuiDefault.tui(api2 as never, undefined, undefined as never);
-    const setup = (commands as Array<{ slash?: { name: string; aliases?: string[] }; onSelect: () => void }>)
-      .find(e => e.slash?.name === "setup" || e.slash?.aliases?.includes("u-setup"));
+    const setup = (commands as Array<{ slash?: { name: string; aliases?: string[] }; onSelect: () => void }>).find(
+      (e) => e.slash?.name === "setup" || e.slash?.aliases?.includes("u-setup"),
+    );
     expect(setup).toBeTruthy();
-    setup!.onSelect();
+    setup?.onSelect();
     expect(h.last()?.title).toContain("Provider accounts");
     expect((h.api.ui as { toast: ReturnType<typeof vi.fn> }).toast).not.toHaveBeenCalled();
   });
@@ -119,7 +167,7 @@ describe("TUI wizard + native dispatch", () => {
     const h = makeApi();
     h.setRoute({ name: "session", params: { sessionID: "s1" } });
     accountsSettings(h.api as never);
-    h.find("login-openai")!.onSelect!();
+    h.find("login-openai")?.onSelect?.();
     await vi.waitFor(() => expect(h.command).toHaveBeenCalled());
     expect(h.command).toHaveBeenCalledWith({ sessionID: "s1", command: "openai-account", arguments: "add" });
   });
@@ -128,7 +176,7 @@ describe("TUI wizard + native dispatch", () => {
     const h = makeApi();
     h.setRoute({ name: "home" });
     accountsSettings(h.api as never);
-    h.find("login-openai")!.onSelect!();
+    h.find("login-openai")?.onSelect?.();
     await vi.waitFor(() => expect(h.command).not.toHaveBeenCalled());
   });
 
@@ -139,11 +187,11 @@ describe("TUI wizard + native dispatch", () => {
     accountsSettings(h.api as never);
     const routingOpt = h.find("routing-openai");
     expect(routingOpt).toBeTruthy();
-    expect(routingOpt!.title).toMatch(/routing/i);
-    routingOpt!.onSelect!();
+    expect(routingOpt?.title).toMatch(/routing/i);
+    routingOpt?.onSelect?.();
     const mainFirst = h.find("main-first");
     expect(mainFirst).toBeTruthy();
-    mainFirst!.onSelect!();
+    mainFirst?.onSelect?.();
     // Routing is applied via a silent RPC (no session command dispatched).
     expect(h.command).not.toHaveBeenCalled();
   });
@@ -171,17 +219,17 @@ describe("TUI wizard + native dispatch", () => {
     cfg.router.tiers.heavy.variant = "medium";
     const h = makeApi();
     routerSettings(h.api as never);
-    h.find("heavy")!.onSelect!();
-    h.find("__add")!.onSelect!();
+    h.find("heavy")?.onSelect?.();
+    h.find("__add")?.onSelect?.();
     // Model picker -> choose the first model
-    const model = h.last()!.options!.find(o => !o.value.startsWith("__"));
-    model!.onSelect!();
+    const model = h.last()?.options?.find((o) => !o.value.startsWith("__"));
+    model?.onSelect?.();
     // If variant picker opened, choose default
-    const vOpt = h.last()!.options!.find(o => o.value === "");
-    if (vOpt) vOpt.onSelect!();
+    const vOpt = h.last()?.options?.find((o) => o.value === "");
+    if (vOpt) vOpt.onSelect?.();
     // Alias picker -> choose "No alias"
-    h.find("__none")!.onSelect!();
-    expect(loadConfig().router.tiers.heavy.fallback).toContain(model!.value);
+    h.find("__none")?.onSelect?.();
+    expect(loadConfig().router.tiers.heavy.fallback).toContain(model?.value);
   });
 
   it("per-target variant editor propagates variants into targets/fallbackVariants", () => {
@@ -192,20 +240,22 @@ describe("TUI wizard + native dispatch", () => {
     saveConfig(cfg, dataDir);
     const h = makeApi();
     // Seed the real catalog: primary (openai) + a distinct fallback (google) with a variant.
-    (h.api as { state: { provider: { id: string; models: Record<string, { name?: string; variant?: string }> }[] } }).state.provider = [
+    (
+      h.api as { state: { provider: { id: string; models: Record<string, { name?: string; variant?: string }> }[] } }
+    ).state.provider = [
       { id: "google", models: { "antigravity-gemini-3.8-flash": { name: "Gemini", variant: "medium" } } },
       { id: "openai", models: { "gpt-6-astra": { name: "Astra", variant: "high" } } },
     ];
     routerSettings(h.api as never);
-    h.find("heavy")!.onSelect!();
-    h.find("__add")!.onSelect!();
-    const g = h.last()!.options!.find(o => o.value === "google/antigravity-gemini-3.8-flash");
+    h.find("heavy")?.onSelect?.();
+    h.find("__add")?.onSelect?.();
+    const g = h.last()?.options?.find((o) => o.value === "google/antigravity-gemini-3.8-flash");
     expect(g).toBeTruthy(); // catalog exposes the distinct fallback target with its variant
-    g!.onSelect!();
+    g?.onSelect?.();
     // Variant picker -> select medium
-    h.find("medium")!.onSelect!();
+    h.find("medium")?.onSelect?.();
     // Alias picker -> select No alias
-    h.find("__none")!.onSelect!();
+    h.find("__none")?.onSelect?.();
     const loaded = loadConfig().router.tiers.heavy;
     // Variant propagated to canonical targets + legacy fallbackVariants.
     expect(loaded.targets).toContainEqual({ model: "google/antigravity-gemini-3.8-flash", variant: "medium" });
@@ -222,35 +272,41 @@ describe("TUI wizard + native dispatch", () => {
     saveConfig(cfg, dataDir);
     const h = makeApi();
     routerSettings(h.api as never);
-    h.find("heavy")!.onSelect!();
-    h.find("__add")!.onSelect!();
-    const model = h.last()!.options!.find(o => !o.value.startsWith("__"));
-    model!.onSelect!();
+    h.find("heavy")?.onSelect?.();
+    h.find("__add")?.onSelect?.();
+    const model = h.last()?.options?.find((o) => !o.value.startsWith("__"));
+    model?.onSelect?.();
     // If variant picker opened, choose default
-    const vOpt = h.last()!.options!.find(o => o.value === "");
-    if (vOpt) vOpt.onSelect!();
+    const vOpt = h.last()?.options?.find((o) => o.value === "");
+    if (vOpt) vOpt.onSelect?.();
     // Alias picker -> choose the "work" alias
-    h.find("work")!.onSelect!();
+    h.find("work")?.onSelect?.();
     const loaded = loadConfig().router.tiers.heavy;
-    expect(loaded.targets).toContainEqual({ alias: "work", model: model!.value });
+    expect(loaded.targets).toContainEqual({ alias: "work", model: model?.value });
   });
 
   it("interruption mid model->variant keeps the last successful model selection", () => {
     writeProviderCreds(cfgDir, ["antigravity"]);
     const cfg = loadConfig();
     // Only heavy is missing (fast/medium confirmed on the default valid models).
-    cfg.wizard = { completed: [], updatedAt: "now", accountsConfirmed: true, accountsSkipAuth: true, tiersConfirmed: { fast: true, medium: true } };
+    cfg.wizard = {
+      completed: [],
+      updatedAt: "now",
+      accountsConfirmed: true,
+      accountsSkipAuth: true,
+      tiersConfirmed: { fast: true, medium: true },
+    };
     cfg.router.tiers.heavy.model = "";
     saveConfig(cfg, dataDir);
     const h = makeApi();
     openWizard(h.api as never);
-    h.find("model")!.onSelect!();
-    h.find("openai")!.onSelect!();
-    const model = h.last()!.options!.find(o => o.value.startsWith("openai/") && !o.value.startsWith("__"));
-    model!.onSelect!();
+    h.find("model")?.onSelect?.();
+    h.find("openai")?.onSelect?.();
+    const model = h.last()?.options?.find((o) => o.value.startsWith("openai/") && !o.value.startsWith("__"));
+    model?.onSelect?.();
     // Cancel out of the variant picker -> the model selection is preserved.
-    h.find("__cancel")!.onSelect!();
-    expect(loadConfig().router.tiers.heavy.model).toBe(model!.value);
+    h.find("__cancel")?.onSelect?.();
+    expect(loadConfig().router.tiers.heavy.model).toBe(model?.value);
   });
 
   it("reset requires confirmation before clearing config", () => {
@@ -269,7 +325,7 @@ describe("TUI wizard + native dispatch", () => {
     // 1. Without chatgpt-web account -> exists is false
     const initial = gatherSidebarData(cfgDir);
     expect(initial.chatgptWeb.exists).toBe(false);
-    const agAcct = initial.antigravity.accounts.find(a => a.label === "work-ag" || a.id.includes("antigravity"));
+    const agAcct = initial.antigravity.accounts.find((a) => a.label === "work-ag" || a.id.includes("antigravity"));
     expect(agAcct).toBeTruthy();
 
     // 2. With chatgpt-web account -> exists is true and displays alias
@@ -308,13 +364,13 @@ describe("TUI wizard + native dispatch", () => {
     accountsSettings(h.api as never);
     const routingManager = h.find("routing-manager");
     expect(routingManager).toBeTruthy();
-    expect(routingManager!.title).toMatch(/Model Manager routing mode/);
+    expect(routingManager?.title).toMatch(/Model Manager routing mode/);
 
     // Open the selector and pick load-balancing -> persists to manager config.
-    routingManager!.onSelect!();
+    routingManager?.onSelect?.();
     const loadBalancing = h.find("load-balancing");
     expect(loadBalancing).toBeTruthy();
-    loadBalancing!.onSelect!();
+    loadBalancing?.onSelect?.();
     expect(loadConfig().router.routing?.mode).toBe("load-balancing");
   });
 
@@ -360,7 +416,7 @@ describe("TUI wizard + native dispatch", () => {
         slots: expect.objectContaining({
           sidebar_content: expect.any(Function),
         }),
-      })
+      }),
     );
 
     // Initial states
@@ -394,7 +450,9 @@ describe("TUI wizard + native dispatch", () => {
 
   it("formatCleanModelName strips Antigravity and produces clean labels", () => {
     expect(formatCleanModelName("google/antigravity-gemini-3.8-flash")).toBe("Gemini 3.8 Flash");
-    expect(formatCleanModelName("google/antigravity-gemini-3.8-flash", "Gemini 3.8 Flash (Antigravity)")).toBe("Gemini 3.8 Flash");
+    expect(formatCleanModelName("google/antigravity-gemini-3.8-flash", "Gemini 3.8 Flash (Antigravity)")).toBe(
+      "Gemini 3.8 Flash",
+    );
     expect(formatCleanModelName("google/gemini-2.5-flash-thinking")).toBe("Gemini 2.5 Flash Thinking");
     expect(formatCleanModelName("openai/gpt-6-astra")).toBe("GPT-6 Astra");
     expect(formatCleanModelName("iit/deepseek-v4-flash")).toBe("DeepSeek V4 Flash");
@@ -406,13 +464,15 @@ describe("TUI wizard + native dispatch", () => {
     routerSettings(h.api as never);
 
     // Verify dialog was set to xlarge
-    expect((h.api.ui as { dialog: { setSize: ReturnType<typeof vi.fn> } }).dialog.setSize).toHaveBeenCalledWith("xlarge");
+    expect((h.api.ui as { dialog: { setSize: ReturnType<typeof vi.fn> } }).dialog.setSize).toHaveBeenCalledWith(
+      "xlarge",
+    );
 
     // 1. Click Orchestrator option -> should open orchestrator menu (not text input)
     const orchOpt = h.find("orch");
     expect(orchOpt).toBeTruthy();
-    expect(orchOpt!.title).toContain("Orchestrator");
-    orchOpt!.onSelect!();
+    expect(orchOpt?.title).toContain("Orchestrator");
+    orchOpt?.onSelect?.();
 
     // In Orchestrator menu
     expect(h.last()?.title).toContain("Orchestrator");
@@ -426,44 +486,48 @@ describe("TUI wizard + native dispatch", () => {
     // Back from Orchestrator menu -> returns to router settings
     const backToRouter = h.find("__back");
     expect(backToRouter).toBeTruthy();
-    backToRouter!.onSelect!();
+    backToRouter?.onSelect?.();
     expect(h.last()?.title).toContain("Router settings");
 
     // 2. Open heavy tier fallback editor
-    h.find("heavy")!.onSelect!();
+    h.find("heavy")?.onSelect?.();
     expect(h.last()?.title).toContain("HEAVY");
 
     // Done button returns to routerSettings, never auto-advances wizard
     const doneOpt = h.find("__done");
     expect(doneOpt).toBeTruthy();
-    doneOpt!.onSelect!();
+    doneOpt?.onSelect?.();
     expect(h.last()?.title).toContain("Router settings");
 
     // 3. Sub-menu Back button inside a fallback item
-    h.find("heavy")!.onSelect!();
+    h.find("heavy")?.onSelect?.();
     // Add a fallback so list is not empty
-    h.find("__add")!.onSelect!();
-    const m = h.last()!.options!.find(o => !o.value.startsWith("__"));
-    m!.onSelect!();
-    const vOpt = h.last()!.options!.find(o => o.value === "");
-    if (vOpt) vOpt.onSelect!();
-    h.find("__none")!.onSelect!();
+    h.find("__add")?.onSelect?.();
+    const m = h.last()?.options?.find((o) => !o.value.startsWith("__"));
+    m?.onSelect?.();
+    const vOpt = h.last()?.options?.find((o) => o.value === "");
+    if (vOpt) vOpt.onSelect?.();
+    h.find("__none")?.onSelect?.();
 
     // Click on the fallback item
-    const fbItem = h.last()!.options!.find(o => o.value.startsWith("openai/") || o.value.startsWith("google/") || o.value.startsWith("iit/"));
+    const fbItem = h
+      .last()
+      ?.options?.find(
+        (o) => o.value.startsWith("openai/") || o.value.startsWith("google/") || o.value.startsWith("iit/"),
+      );
     expect(fbItem).toBeTruthy();
-    fbItem!.onSelect!();
+    fbItem?.onSelect?.();
 
     // Sub-dialog opened: click Back
     const subBack = h.find("__back");
     expect(subBack).toBeTruthy();
-    subBack!.onSelect!();
+    subBack?.onSelect?.();
     // Successfully returned to HEAVY chain editor!
     expect(h.last()?.title).toContain("HEAVY");
   });
 
   it("UNIFIED_ROUTING_OPTIONS exposes the 5 unified options with detailed descriptions", () => {
-    const values = UNIFIED_ROUTING_OPTIONS.map(o => o.value);
+    const values = UNIFIED_ROUTING_OPTIONS.map((o) => o.value);
     expect(values).toEqual(["main-first", "load-balancing", "latency-based", "cost-based", "usage-based"]);
     for (const opt of UNIFIED_ROUTING_OPTIONS) {
       expect(opt.title).toBeTruthy();
@@ -478,10 +542,10 @@ describe("TUI wizard + native dispatch", () => {
     expect(h.last()?.title).toContain("Model Manager routing mode");
     const loadBalancing = h.find("load-balancing");
     expect(loadBalancing).toBeTruthy();
-    expect(loadBalancing!.title).toBe("Load balancing");
+    expect(loadBalancing?.title).toBe("Load balancing");
 
     // Select load-balancing -> applies immediately
-    loadBalancing!.onSelect!();
+    loadBalancing?.onSelect?.();
     expect(h.api.ui as any).toBeTruthy();
   });
 
@@ -498,7 +562,7 @@ describe("TUI wizard + native dispatch", () => {
     expect(h.find("usage-based")).toBeTruthy();
 
     // Choosing an option applies the change and closes the dialog
-    h.find("load-balancing")!.onSelect!();
+    h.find("load-balancing")?.onSelect?.();
     expect(h.last()).toBeNull();
   });
 

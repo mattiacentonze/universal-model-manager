@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyEdits, modify, parse } from "jsonc-parser";
-import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
+import { getOpenCodeConfigDir } from "../shared/paths.js";
 
 const LEGACY_PLUGINS = [
   "@cortexkit/opencode-openai-auth",
@@ -21,9 +21,9 @@ export function cleanOpenCodePlugins(configPath?: string): boolean {
     let plugins = Array.isArray(parsed.plugin) ? [...parsed.plugin] : [];
 
     // Filter out legacy plugins
-    const previousLen = plugins.length;
+    const _previousLen = plugins.length;
     plugins = plugins.filter(
-      p => !LEGACY_PLUGINS.some(legacy => typeof p === "string" && (p === legacy || p.startsWith(`${legacy}@`)))
+      (p) => !LEGACY_PLUGINS.some((legacy) => typeof p === "string" && (p === legacy || p.startsWith(`${legacy}@`))),
     );
 
     // Add universal-model-manager entries if missing
@@ -59,9 +59,7 @@ export function cleanTuiConfig(tuiPath?: string): boolean {
     const parsed = parse(original) || {};
     let plugins = Array.isArray(parsed.plugin) ? [...parsed.plugin] : [];
 
-    plugins = plugins.filter(
-      p => typeof p === "string" && !p.includes("cortexkit")
-    );
+    plugins = plugins.filter((p) => typeof p === "string" && !p.includes("cortexkit"));
 
     if (!plugins.includes("universal-model-manager")) {
       plugins.unshift("universal-model-manager");
@@ -92,7 +90,7 @@ export function uninstallLegacyNpmPackages(configDir = getOpenCodeConfigDir()): 
     const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
     const deps = pkg.dependencies || {};
 
-    const packagesToRemove = LEGACY_PLUGINS.filter(name => deps[name]);
+    const packagesToRemove = LEGACY_PLUGINS.filter((name) => deps[name]);
     if (packagesToRemove.length > 0) {
       logger.info(`Running npm uninstall in ${configDir} for: ${packagesToRemove.join(", ")}`);
       execSync(`npm uninstall ${packagesToRemove.join(" ")}`, {

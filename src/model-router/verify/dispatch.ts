@@ -5,10 +5,10 @@
  * (exec/fs/grader) are built in index.ts from PluginInput and injected.
  */
 import type { RouterConfig } from "../router/config.js";
-import { getActiveTiers } from "../router/protocol.js";
-import { parseDoDFromDispatch, inferDoD } from "./dod.js";
-import type { DoD, InferHints } from "./dod.js";
 import { DEFAULT_IDLE_TTL_MS } from "../router/idle-sweep.js";
+import { getActiveTiers } from "../router/protocol.js";
+import type { DoD, InferHints } from "./dod.js";
+import { inferDoD, parseDoDFromDispatch } from "./dod.js";
 
 export interface ChangedFileStoreOptions {
   /** Injectable clock (tests). Defaults to Date.now. */
@@ -124,11 +124,7 @@ export function parseTaskResult(output: unknown): {
   const finalReturnText = (inner ?? raw).trim();
   const meta = (o.metadata ?? {}) as Record<string, unknown>;
   const childSessionID =
-    typeof meta.sessionId === "string"
-      ? meta.sessionId
-      : typeof meta.sessionID === "string"
-        ? meta.sessionID
-        : null;
+    typeof meta.sessionId === "string" ? meta.sessionId : typeof meta.sessionID === "string" ? meta.sessionID : null;
   return { finalReturnText, childSessionID };
 }
 
@@ -149,10 +145,7 @@ export function buildDelegationDoD(
 }
 
 /** Resolve a tier name to {providerID, modelID} for client.session.prompt. */
-export function tierModel(
-  cfg: RouterConfig,
-  tierName: string,
-): { providerID: string; modelID: string } | null {
+export function tierModel(cfg: RouterConfig, tierName: string): { providerID: string; modelID: string } | null {
   const tiers = getActiveTiers(cfg);
   const t = tiers[tierName];
   if (!t || typeof t.model !== "string") return null;
@@ -165,11 +158,7 @@ export function tierModel(
 }
 
 /** Decide whether a built-in `task` tool call should be verify-dispatched (Option i). */
-export function shouldVerifyTask(
-  tool: string,
-  mode: string,
-  require: string | undefined,
-): boolean {
+export function shouldVerifyTask(tool: string, mode: string, require: string | undefined): boolean {
   if (tool !== "task") return false;
   if (mode === "off") return false;
   if ((require ?? "whenDoDPresent") === "never") return false;
@@ -181,16 +170,12 @@ export function buildForcingNote(
   reasons: string[],
   escalation?: { producerTier?: string; nextTier?: string | null },
 ): string {
-  const body =
-    reasons.length > 0
-      ? reasons.map((r) => `- ${r}`).join("\n")
-      : "- (no reasons provided)";
-  const next =
-    escalation?.nextTier
-      ? `NEXT: address the above, then re-run via \`Task(subagent_type="${escalation.nextTier}")\`` +
-        `${escalation.producerTier ? ` (escalated from ${escalation.producerTier})` : ""}; ` +
-        `do not treat the prior result as complete.`
-      : `NEXT: address the above and re-run the delegation; do not treat the prior result as complete.`;
+  const body = reasons.length > 0 ? reasons.map((r) => `- ${r}`).join("\n") : "- (no reasons provided)";
+  const next = escalation?.nextTier
+    ? `NEXT: address the above, then re-run via \`Task(subagent_type="${escalation.nextTier}")\`` +
+      `${escalation.producerTier ? ` (escalated from ${escalation.producerTier})` : ""}; ` +
+      `do not treat the prior result as complete.`
+    : `NEXT: address the above and re-run the delegation; do not treat the prior result as complete.`;
   return (
     `[router \u26a0 NOT ACCEPTED] The delegated result was not accepted by independent verification:\n` +
     `${body}\n` +

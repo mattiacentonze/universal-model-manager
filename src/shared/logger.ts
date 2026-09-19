@@ -28,13 +28,20 @@ function writeLogLine(level: string, prefix: string, msg: string) {
 
   // Only print to console if debug is enabled or in non-TTY/standalone CLI mode.
   // Never print raw console logs inside TUI interactive sessions to prevent input-bar corruption.
-  if (process.env.DEBUG || process.env.UNIVERSAL_AUTH_DEBUG === "1" || (!process.stdout.isTTY && !process.env.OPENCODE_TUI)) {
+  if (
+    process.env.DEBUG ||
+    process.env.UNIVERSAL_AUTH_DEBUG === "1" ||
+    (!process.stdout.isTTY && !process.env.OPENCODE_TUI)
+  ) {
     console.log(`[${prefix}] [${level}] ${sanitized}`);
   }
 }
 
 export class Logger {
-  constructor(private readonly prefix: string = "universal-auth", private level: LogLevel = "info") {
+  constructor(
+    private readonly prefix: string = "universal-auth",
+    private level: LogLevel = "info",
+  ) {
     if (process.env.DEBUG || process.env.UNIVERSAL_AUTH_DEBUG === "1") {
       this.level = "debug";
     }
@@ -46,25 +53,25 @@ export class Logger {
 
   debug(msg: string, ...args: unknown[]) {
     if (this.shouldLog("debug")) {
-      writeLogLine("DEBUG", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
+      writeLogLine("DEBUG", this.prefix, msg + (args.length ? ` ${JSON.stringify(args)}` : ""));
     }
   }
 
   info(msg: string, ...args: unknown[]) {
     if (this.shouldLog("info")) {
-      writeLogLine("INFO", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
+      writeLogLine("INFO", this.prefix, msg + (args.length ? ` ${JSON.stringify(args)}` : ""));
     }
   }
 
   warn(msg: string, ...args: unknown[]) {
     if (this.shouldLog("warn")) {
-      writeLogLine("WARN", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
+      writeLogLine("WARN", this.prefix, msg + (args.length ? ` ${JSON.stringify(args)}` : ""));
     }
   }
 
   error(msg: string, ...args: unknown[]) {
     if (this.shouldLog("error")) {
-      writeLogLine("ERROR", this.prefix, msg + (args.length ? " " + JSON.stringify(args) : ""));
+      writeLogLine("ERROR", this.prefix, msg + (args.length ? ` ${JSON.stringify(args)}` : ""));
     }
   }
 }

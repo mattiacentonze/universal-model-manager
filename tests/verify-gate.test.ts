@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { accept } from "../src/model-router/verify/gate.js";
-import type { Artefact, Delegation, GateDeps } from "../src/model-router/verify/gate.js";
+import { describe, expect, it } from "vitest";
 import type { DoD } from "../src/model-router/verify/dod.js";
+import type { Artefact, Delegation, GateDeps } from "../src/model-router/verify/gate.js";
+import { accept } from "../src/model-router/verify/gate.js";
 
 describe("model-router/verify/gate.ts", () => {
   const dummyArtefact: Artefact = {
@@ -12,10 +12,7 @@ describe("model-router/verify/gate.ts", () => {
     producerTier: "fast",
   };
 
-  const createDummyDeps = (opts?: {
-    deterministicPass?: boolean;
-    checkerPass?: boolean;
-  }): GateDeps => ({
+  const createDummyDeps = (opts?: { deterministicPass?: boolean; checkerPass?: boolean }): GateDeps => ({
     deterministic: {
       cwd: "/repo",
       fs: {
@@ -23,8 +20,8 @@ describe("model-router/verify/gate.ts", () => {
         readFile: async () => "{}",
       },
       exec: async () => ({
-        code: opts?.deterministicPass ?? true ? 0 : 1,
-        stdout: opts?.deterministicPass ?? true ? "OK" : "ERR",
+        code: (opts?.deterministicPass ?? true) ? 0 : 1,
+        stdout: (opts?.deterministicPass ?? true) ? "OK" : "ERR",
         stderr: "",
         timedOut: false,
       }),
@@ -110,19 +107,11 @@ describe("model-router/verify/gate.ts", () => {
       source: "none",
     };
 
-    const modeBRes = await accept(
-      { dod: dodNone, mode: "modeB", trivial: false },
-      dummyArtefact,
-      createDummyDeps()
-    );
+    const modeBRes = await accept({ dod: dodNone, mode: "modeB", trivial: false }, dummyArtefact, createDummyDeps());
     expect(modeBRes.accepted).toBe(false);
     expect(modeBRes.verdict.reasons[0]).toContain("Mode B is strict");
 
-    const modeARes = await accept(
-      { dod: dodNone, mode: "modeA", trivial: false },
-      dummyArtefact,
-      createDummyDeps()
-    );
+    const modeARes = await accept({ dod: dodNone, mode: "modeA", trivial: false }, dummyArtefact, createDummyDeps());
     expect(modeARes.accepted).toBe(false);
     expect(modeARes.verdict.reasons[0]).toContain("Mode A");
   });
@@ -136,11 +125,7 @@ describe("model-router/verify/gate.ts", () => {
       source: "none",
     };
 
-    const res = await accept(
-      { dod: dodNone, trivial: true },
-      dummyArtefact,
-      createDummyDeps()
-    );
+    const res = await accept({ dod: dodNone, trivial: true }, dummyArtefact, createDummyDeps());
     expect(res.accepted).toBe(true);
     expect(res.verdict.skipped).toBe(true);
     expect(res.verdict.reasons[0]).toContain("trivial dispatch; verification skipped");
@@ -155,19 +140,11 @@ describe("model-router/verify/gate.ts", () => {
       source: "explicit",
     };
 
-    const passRes = await accept(
-      { dod },
-      dummyArtefact,
-      createDummyDeps({ deterministicPass: true })
-    );
+    const passRes = await accept({ dod }, dummyArtefact, createDummyDeps({ deterministicPass: true }));
     expect(passRes.accepted).toBe(true);
     expect(passRes.verdict.pass).toBe(true);
 
-    const failRes = await accept(
-      { dod },
-      dummyArtefact,
-      createDummyDeps({ deterministicPass: false })
-    );
+    const failRes = await accept({ dod }, dummyArtefact, createDummyDeps({ deterministicPass: false }));
     expect(failRes.accepted).toBe(false);
     expect(failRes.verdict.pass).toBe(false);
   });
@@ -181,19 +158,11 @@ describe("model-router/verify/gate.ts", () => {
       source: "annotation",
     };
 
-    const passRes = await accept(
-      { dod },
-      dummyArtefact,
-      createDummyDeps({ checkerPass: true })
-    );
+    const passRes = await accept({ dod }, dummyArtefact, createDummyDeps({ checkerPass: true }));
     expect(passRes.accepted).toBe(true);
     expect(passRes.verdict.pass).toBe(true);
 
-    const failRes = await accept(
-      { dod },
-      dummyArtefact,
-      createDummyDeps({ checkerPass: false })
-    );
+    const failRes = await accept({ dod }, dummyArtefact, createDummyDeps({ checkerPass: false }));
     expect(failRes.accepted).toBe(false);
     expect(failRes.verdict.pass).toBe(false);
   });

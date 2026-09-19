@@ -41,14 +41,15 @@ export interface TierChain {
  *  - balanced: distribute based on quota/health/cooldown — picks the model with
  *    the fewest recent failures and longest time since last cooldown.
  */
-export type RouterRoutingMode = "main-first" | "sticky-balanced" | "round-robin" | "fallback-first" | "sticky" | "balanced";
-
-export type UnifiedRoutingMode =
+export type RouterRoutingMode =
   | "main-first"
-  | "load-balancing"
-  | "latency-based"
-  | "cost-based"
-  | "usage-based";
+  | "sticky-balanced"
+  | "round-robin"
+  | "fallback-first"
+  | "sticky"
+  | "balanced";
+
+export type UnifiedRoutingMode = "main-first" | "load-balancing" | "latency-based" | "cost-based" | "usage-based";
 
 export interface UnifiedRoutingParameters {
   softQuotaThresholdPercent: number;

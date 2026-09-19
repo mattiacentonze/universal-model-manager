@@ -1,9 +1,15 @@
-import type { AccountEntry, ManagerConfig } from "./types.js";
-import { firstMissingStep, loadConfig, managerFilePath, migrateConfig, saveConfig, tierTargets } from "./store.js";
-import { resetManager } from "./operations.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { countRealAccounts, providerConfigured } from "./auth-status.js";
-import { loginActionFor, setMainByManagerId, reorderByManagerIds, type NativeAction, type MutationResult } from "./provider-accounts.js";
+import { resetManager } from "./operations.js";
+import {
+  loginActionFor,
+  type MutationResult,
+  type NativeAction,
+  reorderByManagerIds,
+  setMainByManagerId,
+} from "./provider-accounts.js";
+import { firstMissingStep, loadConfig, managerFilePath, migrateConfig, saveConfig, tierTargets } from "./store.js";
+import type { AccountEntry, ManagerConfig } from "./types.js";
 
 export interface CommandOutput {
   text: string;
@@ -14,13 +20,13 @@ const KINDS = ["openai", "antigravity", "chatgpt-web"] as const;
 
 /** Ensure at most one `main` per provider overlaps with whatever real accounts exist. */
 export function ensureSingleMain(accounts: AccountEntry[]): AccountEntry[] {
-  return KINDS.map((kind): AccountEntry[] => {
-    const ofKind = accounts.filter(a => a.kind === kind);
+  return KINDS.flatMap((kind): AccountEntry[] => {
+    const ofKind = accounts.filter((a) => a.kind === kind);
     if (ofKind.length === 0) return ofKind;
-    const marked = ofKind.filter(a => a.main);
+    const marked = ofKind.filter((a) => a.main);
     const mainId = marked.length > 0 ? marked[0].id : ofKind[0].id;
-    return ofKind.map(a => ({ ...a, main: a.id === mainId }));
-  }).flat();
+    return ofKind.map((a) => ({ ...a, main: a.id === mainId }));
+  });
 }
 
 function accountLine(a: AccountEntry, real: number): string {
@@ -30,7 +36,7 @@ function accountLine(a: AccountEntry, real: number): string {
 
 /** Display form of a fallback target: alias/provider/model-variant. */
 function targetLabel(t: { alias?: string; model: string; variant?: string }): string {
-  return `${t.alias ? t.alias + "/" : ""}${t.model}${t.variant ? `-${t.variant}` : ""}`;
+  return `${t.alias ? `${t.alias}/` : ""}${t.model}${t.variant ? `-${t.variant}` : ""}`;
 }
 
 function cfgWithConfigDir(dir?: string, configDir = getOpenCodeConfigDir()): ManagerConfig {
@@ -52,7 +58,7 @@ export async function handleManagerCommand(
   command: string,
   args = "",
   dir?: string,
-  configDir = getOpenCodeConfigDir()
+  configDir = getOpenCodeConfigDir(),
 ): Promise<CommandOutput | null> {
   const parts = args.trim().split(/\s+/).filter(Boolean);
 
@@ -93,7 +99,10 @@ export async function handleManagerCommand(
         }
         // Do NOT fake `configured`; the account becomes real only after the actual
         // provider login, which this action delegates to the consumer (TUI/CLI).
-        return { text: `[Manager] Initiated ${kind} login. Complete the native flow, then re-run /u-accounts to see it.`, action: loginActionFor(kind) };
+        return {
+          text: `[Manager] Initiated ${kind} login. Complete the native flow, then re-run /u-accounts to see it.`,
+          action: loginActionFor(kind),
+        };
       }
       if (sub === "main") {
         const id = parts[1];
@@ -118,7 +127,7 @@ export async function handleManagerCommand(
       const cfgLive = cfgWithConfigDir(dir, configDir);
       const lines = [
         "Accounts (real provider status):",
-        ...cfgLive.accounts.map(a => accountLine(a, countRealAccounts(a.kind, configDir))),
+        ...cfgLive.accounts.map((a) => accountLine(a, countRealAccounts(a.kind, configDir))),
       ];
       return { text: lines.join("\n") };
     }
@@ -161,11 +170,13 @@ export async function handleManagerCommand(
           fallback: fallback.length ? fallback : cfg.router.tiers[tier].fallback,
         };
         saveConfig(cfg, dir);
-        return { text: `[Manager] ${tier} chain set to ${model}${variant ? ` (${variant})` : ""} -> ${fallback.join(", ")}.` };
+        return {
+          text: `[Manager] ${tier} chain set to ${model}${variant ? ` (${variant})` : ""} -> ${fallback.join(", ")}.`,
+        };
       }
       const lines = [
         `Router: ${cfg.router.enabled ? "enabled" : "disabled"} | orchestrator: ${cfg.router.orchestrator}`,
-        ...(["fast", "medium", "heavy"] as const).map(t => {
+        ...(["fast", "medium", "heavy"] as const).map((t) => {
           const c = cfg.router.tiers[t];
           return `  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${tierTargets(c).map(targetLabel).join(", ") || "-"}`;
         }),
@@ -190,12 +201,12 @@ export function summarize(cfg: ManagerConfig, configDir = getOpenCodeConfigDir()
   const next = firstMissingStep(cfg, configDir);
   const lines = [
     "Model Manager",
-    ...cfg.accounts.map(a => accountLine(a, countRealAccounts(a.kind, configDir))),
-    ...(["fast", "medium", "heavy"] as const).map(t => {
+    ...cfg.accounts.map((a) => accountLine(a, countRealAccounts(a.kind, configDir))),
+    ...(["fast", "medium", "heavy"] as const).map((t) => {
       const c = cfg.router.tiers[t];
       return `  ${t}: ${c.model}${c.variant ? ` (${c.variant})` : ""} -> ${tierTargets(c).map(targetLabel).join(", ") || "-"}`;
     }),
-    `  Wizard: ${next === null ? "complete" : "resume @" + next}`,
+    `  Wizard: ${next === null ? "complete" : `resume @${next}`}`,
   ];
   return lines.join("\n");
 }

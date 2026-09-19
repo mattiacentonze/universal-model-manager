@@ -1,11 +1,12 @@
 // Vendored from opencode-runtime-fallback 0.2.4 (MIT). Self-contained engine.
 // @bun
-import { telemetry } from "../telemetry/index.js";
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { Hooks, PluginInput } from "@opencode-ai/plugin";
 import { parse as parseJsonc } from "jsonc-parser";
-import type { PluginInput, Hooks } from "@opencode-ai/plugin";
+import { telemetry } from "../telemetry/index.js";
 
 // types.ts
 export interface FallbackConfig {
@@ -104,7 +105,7 @@ export interface AutoRetryHelpers {
     newModel: string,
     resolvedAgent: string | undefined,
     source: string,
-    plan: FallbackPlanSuccess | undefined
+    plan: FallbackPlanSuccess | undefined,
   ) => Promise<boolean>;
   resolveAgentForSessionFromContext: (sessionID: string, eventAgent: string | undefined) => Promise<string | undefined>;
   cleanupStaleSessions: () => void;
@@ -115,7 +116,7 @@ export interface AutoRetryHelpers {
       preferredModel?: string;
       resolvedAgent?: string;
       allowFirstAgentFallback?: boolean;
-    }
+    },
   ) => FallbackState | undefined;
   notifyFallback: (options: {
     title?: string;
@@ -126,10 +127,7 @@ export interface AutoRetryHelpers {
     prefixMessage?: string;
     immediate?: boolean;
   }) => void;
-  notifyExhausted: (options: {
-    totalFallbackModels: number;
-    attemptCount?: number;
-  }) => Promise<void>;
+  notifyExhausted: (options: { totalFallbackModels: number; attemptCount?: number }) => Promise<void>;
   notifyRecovered: (model: string) => void;
 }
 
@@ -144,7 +142,7 @@ const DEFAULT_CONFIG: FallbackConfig = {
   timeout_seconds: 30,
   notify_on_fallback: true,
   routing_mode: "main-first",
-  fallback_models: []
+  fallback_models: [],
 };
 const RETRYABLE_ERROR_PATTERNS: RegExp[] = [
   /rate.?limit/i,
@@ -161,7 +159,7 @@ const RETRYABLE_ERROR_PATTERNS: RegExp[] = [
   /insufficient.?(?:credits?|funds?|balance)/i,
   /(?:^|\s)429(?:\s|$)/,
   /(?:^|\s)503(?:\s|$)/,
-  /(?:^|\s)529(?:\s|$)/
+  /(?:^|\s)529(?:\s|$)/,
 ];
 
 // logger.ts
@@ -199,21 +197,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function normalizeFallbackModelsField(value: unknown): string[] {
-  if (!value)
-    return [];
-  if (typeof value === "string")
-    return [value];
+  if (!value) return [];
+  if (typeof value === "string") return [value];
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === "string");
   }
   return [];
 }
 function readFallbackModels(agentName: string, agents?: AgentConfigs): string[] {
-  if (!agents)
-    return [];
+  if (!agents) return [];
   const agentConfig = agents[agentName];
-  if (!isRecord(agentConfig))
-    return [];
+  if (!isRecord(agentConfig)) return [];
   return normalizeFallbackModelsField(agentConfig.fallback_models);
 }
 function resolveAgentForSession(sessionID: string, eventAgent?: string): string | undefined {
@@ -234,7 +228,7 @@ function getFallbackModelsForSession(
   sessionID: string,
   eventAgent: string | undefined,
   agents: AgentConfigs | undefined,
-  globalFallbackModels: string[]
+  globalFallbackModels: string[],
 ): string[] {
   const resolvedAgent = resolveAgentForSession(sessionID, eventAgent);
   if (resolvedAgent && agents) {
@@ -266,13 +260,12 @@ function createFallbackState(originalModel: string): FallbackState {
     failedModels: new Map(),
     attemptCount: 0,
     modelRetryCount: 0,
-    pendingFallbackModel: undefined
+    pendingFallbackModel: undefined,
   };
 }
 function isModelInCooldown(model: string, state: FallbackState, cooldownSeconds: number): boolean {
   const failedAt = state.failedModels.get(model);
-  if (failedAt === undefined)
-    return false;
+  if (failedAt === undefined) return false;
   const cooldownMs = cooldownSeconds * 1000;
   return Date.now() - failedAt < cooldownMs;
 }
@@ -280,7 +273,7 @@ function findNextAvailableFallback(
   state: FallbackState,
   fallbackModels: string[],
   cooldownSeconds: number,
-  routingMode = "main-first"
+  routingMode = "main-first",
 ): string | undefined {
   const scan = (from: number, to: number): string | undefined => {
     for (let i = from; i < to; i++) {
@@ -297,7 +290,12 @@ function findNextAvailableFallback(
     return undefined;
   };
   const start = state.fallbackIndex + 1;
-  if (routingMode === "balanced" || routingMode === "sticky-balanced" || routingMode === "load-balancing" || routingMode === "usage-based") {
+  if (
+    routingMode === "balanced" ||
+    routingMode === "sticky-balanced" ||
+    routingMode === "load-balancing" ||
+    routingMode === "usage-based"
+  ) {
     const available: { candidate: string; lastFailed: number; index: number }[] = [];
     for (let i = 0; i < fallbackModels.length; i++) {
       const candidate = fallbackModels[i];
@@ -393,14 +391,14 @@ function planFallback(
   sessionID: string,
   state: FallbackState,
   fallbackModels: string[],
-  config: FallbackConfig
+  config: FallbackConfig,
 ): FallbackPlan {
   if (state.attemptCount >= config.max_fallback_attempts) {
     logInfo(`Max fallback attempts reached for session ${sessionID} (${state.attemptCount})`);
     return {
       success: false,
       error: "Max fallback attempts reached",
-      maxAttemptsReached: true
+      maxAttemptsReached: true,
     };
   }
   const nextModel = findNextAvailableFallback(state, fallbackModels, config.cooldown_seconds, config.routing_mode);
@@ -408,15 +406,17 @@ function planFallback(
     logInfo(`No available fallback models for session ${sessionID}`);
     return {
       success: false,
-      error: "No available fallback models (all in cooldown or exhausted)"
+      error: "No available fallback models (all in cooldown or exhausted)",
     };
   }
-  logInfo(`Planned fallback for session ${sessionID}: ${state.currentModel} -> ${nextModel} (will be attempt ${state.attemptCount + 1})`);
+  logInfo(
+    `Planned fallback for session ${sessionID}: ${state.currentModel} -> ${nextModel} (will be attempt ${state.attemptCount + 1})`,
+  );
   return {
     success: true,
     newModel: nextModel,
     failedModel: state.currentModel,
-    newFallbackIndex: fallbackModels.indexOf(nextModel)
+    newFallbackIndex: fallbackModels.indexOf(nextModel),
   };
 }
 function commitFallback(state: FallbackState, plan: FallbackPlanSuccess): boolean {
@@ -427,10 +427,8 @@ function commitFallback(state: FallbackState, plan: FallbackPlanSuccess): boolea
   return true;
 }
 function recoverToOriginal(state: FallbackState, cooldownSeconds: number): boolean {
-  if (state.currentModel === state.originalModel)
-    return false;
-  if (isModelInCooldown(state.originalModel, state, cooldownSeconds))
-    return false;
+  if (state.currentModel === state.originalModel) return false;
+  if (isModelInCooldown(state.originalModel, state, cooldownSeconds)) return false;
   state.currentModel = state.originalModel;
   state.fallbackIndex = -1;
   state.attemptCount = 0;
@@ -455,7 +453,7 @@ function filterPartsByTier(parts: ReplayPart[], tier: number): ReplayPart[] {
 }
 async function replayWithDegradation(
   allParts: ReplayPart[],
-  sendFn: (parts: ReplayPart[]) => Promise<void>
+  sendFn: (parts: ReplayPart[]) => Promise<void>,
 ): Promise<ReplayResult> {
   if (allParts.length === 0) {
     return { success: false, error: "No parts to replay" };
@@ -465,10 +463,8 @@ async function replayWithDegradation(
   let previousLength = -1;
   for (const tier of tiers) {
     const filtered = filterPartsByTier(allParts, tier);
-    if (filtered.length === 0)
-      continue;
-    if (filtered.length === previousLength)
-      continue;
+    if (filtered.length === 0) continue;
+    if (filtered.length === previousLength) continue;
     previousLength = filtered.length;
     try {
       await sendFn(filtered);
@@ -479,7 +475,7 @@ async function replayWithDegradation(
         success: true,
         tier,
         sentParts: filtered,
-        droppedTypes
+        droppedTypes,
       };
     } catch (err) {
       lastError = err;
@@ -487,14 +483,19 @@ async function replayWithDegradation(
   }
   return {
     success: false,
-    error: lastError instanceof Error ? lastError.message : String(lastError)
+    error: lastError instanceof Error ? lastError.message : String(lastError),
   };
 }
 
 // auto-retry.ts
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const POST_ABORT_DELAY_MS = 150;
-function summarizeParts(parts?: ReplayPart[]): { count: number; types: string[]; textChars: number; hasToolCall: boolean } {
+function summarizeParts(parts?: ReplayPart[]): {
+  count: number;
+  types: string[];
+  textChars: number;
+  hasToolCall: boolean;
+} {
   if (!parts || parts.length === 0) {
     return { count: 0, types: [], textChars: 0, hasToolCall: false };
   }
@@ -515,7 +516,7 @@ function summarizeParts(parts?: ReplayPart[]): { count: number; types: string[];
     count: parts.length,
     types: Array.from(typeSet),
     textChars,
-    hasToolCall
+    hasToolCall,
   };
 }
 function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
@@ -526,17 +527,15 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     sessionLastAccess,
     sessionRetryInFlight,
     sessionAwaitingFallbackResult,
-    sessionFallbackTimeouts
+    sessionFallbackTimeouts,
   } = deps;
 
   const findFirstAgentModel = (): string | undefined => {
-    if (!deps.agentConfigs)
-      return undefined;
+    if (!deps.agentConfigs) return undefined;
     for (const agentName of Object.keys(deps.agentConfigs)) {
       const agentConfig = deps.agentConfigs[agentName];
       const model = agentConfig?.model;
-      if (model)
-        return model;
+      if (model) return model;
     }
     return undefined;
   };
@@ -547,7 +546,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
       preferredModel?: string;
       resolvedAgent?: string;
       allowFirstAgentFallback?: boolean;
-    }
+    },
   ): FallbackState | undefined => {
     let state = sessionStates.get(sessionID);
     if (!state) {
@@ -583,11 +582,12 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     let message = options.message;
     if (!message) {
       if (options.prefixMessage) {
-        const suffix = options.attemptCount !== undefined && options.totalFallbackModels !== undefined
-          ? ` (attempt ${options.attemptCount} of ${options.totalFallbackModels})`
-          : options.immediate
-          ? " (immediate fallback)"
-          : "";
+        const suffix =
+          options.attemptCount !== undefined && options.totalFallbackModels !== undefined
+            ? ` (attempt ${options.attemptCount} of ${options.totalFallbackModels})`
+            : options.immediate
+              ? " (immediate fallback)"
+              : "";
         message = `${options.prefixMessage} -> ${modelName}${suffix}`;
       } else if (options.attemptCount !== undefined && options.totalFallbackModels !== undefined) {
         message = `Switching to ${modelName} (attempt ${options.attemptCount} of ${options.totalFallbackModels})`;
@@ -595,53 +595,56 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         message = `Switching to ${modelName} for next request`;
       }
     }
-    ctx.client.tui.showToast({
-      body: {
-        title: options.title || "Model Fallback",
-        message,
-        variant: "warning",
-        duration: 5000
-      }
-    }).catch(() => {});
+    ctx.client.tui
+      .showToast({
+        body: {
+          title: options.title || "Model Fallback",
+          message,
+          variant: "warning",
+          duration: 5000,
+        },
+      })
+      .catch(() => {});
   };
 
-  const notifyExhausted = async (options: {
-    totalFallbackModels: number;
-    attemptCount?: number;
-  }): Promise<void> => {
+  const notifyExhausted = async (options: { totalFallbackModels: number; attemptCount?: number }): Promise<void> => {
     if (!config.notify_on_fallback) return;
     const attemptsSuffix = options.attemptCount !== undefined ? ` after ${options.attemptCount} attempts` : "";
-    await ctx.client.tui.showToast({
-      body: {
-        title: "All Fallbacks Exhausted",
-        variant: "error",
-        duration: 8000,
-        message: `All ${options.totalFallbackModels} fallback models exhausted${attemptsSuffix}`
-      }
-    }).catch(() => {});
+    await ctx.client.tui
+      .showToast({
+        body: {
+          title: "All Fallbacks Exhausted",
+          variant: "error",
+          duration: 8000,
+          message: `All ${options.totalFallbackModels} fallback models exhausted${attemptsSuffix}`,
+        },
+      })
+      .catch(() => {});
   };
 
   const notifyRecovered = (model: string): void => {
     if (!config.notify_on_fallback) return;
     const modelName = model.split("/").pop() || model;
-    ctx.client.tui.showToast({
-      body: {
-        title: "Model Recovered",
-        message: `Recovered to ${modelName}`,
-        variant: "info",
-        duration: 3000
-      }
-    }).catch(() => {});
+    ctx.client.tui
+      .showToast({
+        body: {
+          title: "Model Recovered",
+          message: `Recovered to ${modelName}`,
+          variant: "info",
+          duration: 3000,
+        },
+      })
+      .catch(() => {});
   };
 
   const getParentSessionID = async (sessionID: string): Promise<string | null> => {
     const cached = deps.sessionParentID.get(sessionID);
-    if (cached !== undefined)
-      return cached;
+    if (cached !== undefined) return cached;
     try {
       const sessionInfo: any = await ctx.client.session.get({ path: { id: sessionID } });
       const sessionData = sessionInfo?.data ?? sessionInfo;
-      const parentID = typeof sessionData?.parentID === "string" && sessionData.parentID.length > 0 ? sessionData.parentID : null;
+      const parentID =
+        typeof sessionData?.parentID === "string" && sessionData.parentID.length > 0 ? sessionData.parentID : null;
       deps.sessionParentID.set(sessionID, parentID);
       if (parentID) {
         logInfo("Detected child session", { sessionID, parentID });
@@ -660,7 +663,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     } catch (error) {
       logError(`Failed to abort in-flight session request (${source})`, {
         sessionID,
-        error: String(error)
+        error: String(error),
       });
     }
   };
@@ -674,19 +677,17 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
   const scheduleSessionFallbackTimeout = (sessionID: string, resolvedAgent: string | undefined): void => {
     clearSessionFallbackTimeout(sessionID);
     const timeoutMs = config.timeout_seconds * 1000;
-    if (timeoutMs <= 0)
-      return;
+    if (timeoutMs <= 0) return;
     const timer = setTimeout(async () => {
       sessionFallbackTimeouts.delete(sessionID);
       if (deps.sessionFirstTokenReceived.get(sessionID)) {
         logInfo("Timeout fired but first token already received, skipping abort", {
-          sessionID
+          sessionID,
         });
         return;
       }
       const state = sessionStates.get(sessionID);
-      if (!state)
-        return;
+      if (!state) return;
       if (sessionRetryInFlight.has(sessionID)) {
         logInfo("Timeout fired but retry already in flight, deferring", { sessionID });
         return;
@@ -696,13 +697,17 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
       if (state.pendingFallbackModel) {
         state.pendingFallbackModel = undefined;
       }
-      const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
-      if (fallbackModels.length === 0)
-        return;
+      const fallbackModels = getFallbackModelsForSession(
+        sessionID,
+        resolvedAgent,
+        deps.agentConfigs,
+        deps.globalFallbackModels,
+      );
+      if (fallbackModels.length === 0) return;
       logInfo("Session fallback timeout reached", {
         sessionID,
         timeoutSeconds: config.timeout_seconds,
-        currentModel: state.currentModel
+        currentModel: state.currentModel,
       });
       sessionRetryInFlight.add(sessionID);
       try {
@@ -721,26 +726,32 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     newModel: string,
     resolvedAgent: string | undefined,
     source: string,
-    plan: FallbackPlanSuccess | undefined
+    plan: FallbackPlanSuccess | undefined,
   ): Promise<boolean> => {
     let deferredToOtherHandler = false;
     const preCheckState = sessionStates.get(sessionID);
     if (plan) {
       if (preCheckState && preCheckState.currentModel !== plan.failedModel) {
-        logInfo(`Skipping stale autoRetryWithFallback (${source}): state already at ${preCheckState.currentModel}, expected failed model ${plan.failedModel}`, {
-          sessionID,
-          staleModel: newModel,
-          currentModel: preCheckState.currentModel
-        });
+        logInfo(
+          `Skipping stale autoRetryWithFallback (${source}): state already at ${preCheckState.currentModel}, expected failed model ${plan.failedModel}`,
+          {
+            sessionID,
+            staleModel: newModel,
+            currentModel: preCheckState.currentModel,
+          },
+        );
         deferredToOtherHandler = true;
         return false;
       }
     } else if (preCheckState && preCheckState.currentModel !== newModel) {
-      logInfo(`Skipping stale autoRetryWithFallback (${source}): state already at ${preCheckState.currentModel}, wanted ${newModel}`, {
-        sessionID,
-        staleModel: newModel,
-        currentModel: preCheckState.currentModel
-      });
+      logInfo(
+        `Skipping stale autoRetryWithFallback (${source}): state already at ${preCheckState.currentModel}, wanted ${newModel}`,
+        {
+          sessionID,
+          staleModel: newModel,
+          currentModel: preCheckState.currentModel,
+        },
+      );
       deferredToOtherHandler = true;
       return false;
     }
@@ -755,7 +766,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     }
     const fallbackModelObj = {
       providerID: modelParts[0],
-      modelID: modelParts.slice(1).join("/")
+      modelID: modelParts.slice(1).join("/"),
     };
     const modelAlreadyStopped = source === "session.error" || source === "message.updated";
     const callerAlreadyAborted = source === "session.timeout";
@@ -763,7 +774,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     if (modelAlreadyStopped) {
       logInfo(`Skipping abort \u2014 model already stopped (${source})`, {
         sessionID,
-        newModel
+        newModel,
       });
     } else if (callerAlreadyAborted || mayHaveRecentAbort) {
       const selfAbortTs = deps.sessionSelfAbortTimestamp.get(sessionID);
@@ -771,7 +782,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
       if (selfAbortTs && msSinceAbort !== undefined && msSinceAbort < POST_ABORT_DELAY_MS * 2) {
         logInfo(`Waiting for recent abort propagation (${source})`, {
           sessionID,
-          msSinceAbort
+          msSinceAbort,
         });
         const remainingMs = Math.max(0, POST_ABORT_DELAY_MS - msSinceAbort);
         if (remainingMs > 0) {
@@ -779,7 +790,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         }
       } else if (callerAlreadyAborted) {
         logInfo(`Caller already aborted (${source}), waiting for propagation`, {
-          sessionID
+          sessionID,
         });
         await new Promise<void>((resolve) => setTimeout(() => resolve(), POST_ABORT_DELAY_MS));
       }
@@ -795,7 +806,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         logInfo(`Compaction fallback: abort + summarize on fallback (${source})`, {
           sessionID,
           failedModel,
-          newModel
+          newModel,
         });
         deps.sessionCompactionInFlight.add(sessionID);
         if (failedModel && plan) {
@@ -815,7 +826,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         try {
           const messagesResp: any = await ctx.client.session.messages({
             path: { id: sessionID },
-            query: { directory: ctx.directory }
+            query: { directory: ctx.directory },
           });
           const msgs: any[] = messagesResp.data ?? [];
           const deleteIDs: string[] = [];
@@ -826,8 +837,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
             const msgID = msg.info?.id;
             const parts = msg.parts ?? [];
             const isCompactionMsg = parts.length > 0 && parts.every((p: any) => p.type === "compaction");
-            if (!msgID)
-              continue;
+            if (!msgID) continue;
             if (msgRole === "assistant" && msgError) {
               deleteIDs.push(msgID);
               continue;
@@ -842,35 +852,35 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
             for (const msgID of deleteIDs) {
               logInfo(`Deleting compaction message (${source})`, {
                 sessionID,
-                messageID: msgID
+                messageID: msgID,
               });
               try {
                 await rawClient.delete({
                   url: "/session/{id}/message/{messageID}",
-                  path: { id: sessionID, messageID: msgID }
+                  path: { id: sessionID, messageID: msgID },
                 });
                 logInfo(`Deleted compaction message (${source})`, {
                   sessionID,
-                  messageID: msgID
+                  messageID: msgID,
                 });
               } catch (delErr) {
                 logError(`Failed to delete compaction message (${source})`, {
                   sessionID,
                   messageID: msgID,
-                  error: String(delErr)
+                  error: String(delErr),
                 });
               }
             }
           } else if (deleteIDs.length > 0) {
             logError(`Cannot access raw SDK client for message deletion (${source})`, {
               sessionID,
-              messageCount: deleteIDs.length
+              messageCount: deleteIDs.length,
             });
           }
         } catch (msgErr) {
           logError(`Failed during compaction message cleanup (${source})`, {
             sessionID,
-            error: String(msgErr)
+            error: String(msgErr),
           });
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 200));
@@ -884,20 +894,20 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
           logInfo(`Dispatching session.summarize on fallback model (${source})`, {
             sessionID,
             providerID: fallbackModelObj.providerID,
-            modelID: fallbackModelObj.modelID
+            modelID: fallbackModelObj.modelID,
           });
           const summarizeResult = await ctx.client.session.summarize({
             path: { id: sessionID },
             body: {
               providerID: fallbackModelObj.providerID,
-              modelID: fallbackModelObj.modelID
+              modelID: fallbackModelObj.modelID,
             },
-            query: { directory: ctx.directory }
+            query: { directory: ctx.directory },
           });
           logInfo(`session.summarize response (${source})`, {
             sessionID,
             model: newModel,
-            response: (JSON.stringify(summarizeResult) ?? "undefined").slice(0, 500)
+            response: (JSON.stringify(summarizeResult) ?? "undefined").slice(0, 500),
           });
           if (plan) {
             const stateToCommit = sessionStates.get(sessionID);
@@ -908,7 +918,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
                   sessionID,
                   from: plan.failedModel,
                   to: plan.newModel,
-                  attemptCount: stateToCommit.attemptCount
+                  attemptCount: stateToCommit.attemptCount,
                 });
               }
             }
@@ -918,25 +928,27 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
           if (config.notify_on_fallback) {
             const fromName = (failedModel || "primary").split("/").pop();
             const toName = newModel.split("/").pop() || newModel;
-            await ctx.client.tui.showToast({
-              body: {
-                title: "Compaction Fallback",
-                message: `${fromName} failed \u2014 retrying compaction on ${toName}`,
-                variant: "warning",
-                duration: 5000
-              }
-            }).catch(() => {});
+            await ctx.client.tui
+              .showToast({
+                body: {
+                  title: "Compaction Fallback",
+                  message: `${fromName} failed \u2014 retrying compaction on ${toName}`,
+                  variant: "warning",
+                  duration: 5000,
+                },
+              })
+              .catch(() => {});
           }
           logInfo(`Compaction re-dispatched via summarize (${source})`, {
             sessionID,
-            model: newModel
+            model: newModel,
           });
           return true;
         } catch (summarizeErr) {
           logError(`session.summarize failed (${source})`, {
             sessionID,
             model: newModel,
-            error: String(summarizeErr)
+            error: String(summarizeErr),
           });
           sessionAwaitingFallbackResult.delete(sessionID);
           if (plan) {
@@ -946,7 +958,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
               logInfo(`Committed compaction fallback state as last resort (${source})`, {
                 sessionID,
                 from: plan.failedModel,
-                to: plan.newModel
+                to: plan.newModel,
               });
             }
           }
@@ -956,14 +968,16 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
           if (config.notify_on_fallback) {
             const fromName = (failedModel || "primary").split("/").pop();
             const toName = newModel.split("/").pop() || newModel;
-            await ctx.client.tui.showToast({
-              body: {
-                title: "Compaction Failed",
-                message: `${fromName} can't compact \u2014 try /compact after switching to ${toName}`,
-                variant: "warning",
-                duration: 1e4
-              }
-            }).catch(() => {});
+            await ctx.client.tui
+              .showToast({
+                body: {
+                  title: "Compaction Failed",
+                  message: `${fromName} can't compact \u2014 try /compact after switching to ${toName}`,
+                  variant: "warning",
+                  duration: 1e4,
+                },
+              })
+              .catch(() => {});
           }
           deferredToOtherHandler = true;
           return false;
@@ -971,7 +985,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
       }
       const messagesResp: any = await ctx.client.session.messages({
         path: { id: sessionID },
-        query: { directory: ctx.directory }
+        query: { directory: ctx.directory },
       });
       const msgs: any[] = messagesResp.data;
       if (!msgs || msgs.length === 0) {
@@ -983,11 +997,9 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         const m = msgs?.[i];
         const role = (m?.info?.role ?? m?.role ?? "").toLowerCase();
         const parts = m?.parts ?? m?.info?.parts;
-        if (!parts || parts.length === 0)
-          continue;
+        if (!parts || parts.length === 0) continue;
         const hasOnlyCompactionParts = parts.every((p: any) => p.type === "compaction");
-        if (hasOnlyCompactionParts)
-          continue;
+        if (hasOnlyCompactionParts) continue;
         if (!lastNonAssistantPartsRaw && role !== "assistant") {
           lastNonAssistantPartsRaw = parts;
         }
@@ -1002,18 +1014,21 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         const postCheckState = sessionStates.get(sessionID);
         const expectedCurrentModel = plan ? plan.failedModel : newModel;
         if (postCheckState && postCheckState.currentModel !== expectedCurrentModel) {
-          logInfo(`Skipping stale autoRetryWithFallback (${source}): state already at ${postCheckState.currentModel}, expected failed model ${expectedCurrentModel}`, {
-            sessionID,
-            staleModel: newModel,
-            currentModel: postCheckState.currentModel
-          });
+          logInfo(
+            `Skipping stale autoRetryWithFallback (${source}): state already at ${postCheckState.currentModel}, expected failed model ${expectedCurrentModel}`,
+            {
+              sessionID,
+              staleModel: newModel,
+              currentModel: postCheckState.currentModel,
+            },
+          );
           deferredToOtherHandler = true;
           return false;
         }
         if (sessionAwaitingFallbackResult.has(sessionID)) {
           logInfo(`Skipping duplicate fallback dispatch \u2014 another handler already dispatched (${source})`, {
             sessionID,
-            model: newModel
+            model: newModel,
           });
           deferredToOtherHandler = true;
           return false;
@@ -1023,15 +1038,17 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
           sessionID,
           model: newModel,
           agent: resolvedAgent,
-          replaySource
+          replaySource,
         });
-        const allParts: ReplayPart[] = replayPartsRaw.filter((p: any) => typeof p.type === "string" && p.type !== "compaction");
+        const allParts: ReplayPart[] = replayPartsRaw.filter(
+          (p: any) => typeof p.type === "string" && p.type !== "compaction",
+        );
         logInfo(`Prepared replay payload (${source})`, {
           sessionID,
           model: newModel,
           agent: resolvedAgent,
           replaySource,
-          payload: summarizeParts(allParts)
+          payload: summarizeParts(allParts),
         });
         if (allParts.length > 0) {
           const sendFn = async (parts: ReplayPart[]): Promise<void> => {
@@ -1039,21 +1056,21 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
               sessionID,
               model: newModel,
               agent: resolvedAgent,
-              payload: summarizeParts(parts)
+              payload: summarizeParts(parts),
             });
             await ctx.client.session.promptAsync({
               path: { id: sessionID },
               body: {
                 ...(resolvedAgent ? { agent: resolvedAgent } : {}),
                 model: fallbackModelObj,
-                parts: parts as any
+                parts: parts as any,
               },
-              query: { directory: ctx.directory }
+              query: { directory: ctx.directory },
             });
             logInfo(`Fallback replay accepted by host (${source})`, {
               sessionID,
               model: newModel,
-              agent: resolvedAgent
+              agent: resolvedAgent,
             });
           };
           const replayResult = await replayWithDegradation(allParts, sendFn);
@@ -1068,13 +1085,16 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
                     sessionID,
                     newModel: plan.newModel,
                     failedModel: plan.failedModel,
-                    attemptCount: stateToCommit.attemptCount
+                    attemptCount: stateToCommit.attemptCount,
                   });
                 } else {
-                  logInfo(`Fallback state already committed by another handler \u2014 aborting duplicate replay (${source})`, {
-                    sessionID,
-                    newModel: plan.newModel
-                  });
+                  logInfo(
+                    `Fallback state already committed by another handler \u2014 aborting duplicate replay (${source})`,
+                    {
+                      sessionID,
+                      newModel: plan.newModel,
+                    },
+                  );
                   commitSucceeded = false;
                   await abortSessionRequest(sessionID, `duplicate-replay.${source}`);
                 }
@@ -1091,23 +1111,25 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
               tier: replayResult.tier,
               sentPartsCount: replayResult.sentParts?.length,
               droppedTypes: replayResult.droppedTypes,
-              replaySource
+              replaySource,
             });
             if (replayResult.droppedTypes && replayResult.droppedTypes.length > 0) {
               const droppedStr = replayResult.droppedTypes.join(", ");
-              await ctx.client.tui.showToast({
-                body: {
-                  title: "Message Replay",
-                  message: `Some message parts were dropped for compatibility: ${droppedStr}`,
-                  variant: "warning",
-                  duration: 5000
-                }
-              }).catch(() => {});
+              await ctx.client.tui
+                .showToast({
+                  body: {
+                    title: "Message Replay",
+                    message: `Some message parts were dropped for compatibility: ${droppedStr}`,
+                    variant: "warning",
+                    duration: 5000,
+                  },
+                })
+                .catch(() => {});
             }
           } else {
             logError(`All replay tiers failed (${source})`, {
               sessionID,
-              error: replayResult.error
+              error: replayResult.error,
             });
           }
         }
@@ -1115,13 +1137,13 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
         logInfo(`No replayable non-assistant message found for auto-retry (${source})`, {
           sessionID,
           model: newModel,
-          agent: resolvedAgent
+          agent: resolvedAgent,
         });
       }
     } catch (retryError) {
       logError(`Auto-retry failed (${source})`, {
         sessionID,
-        error: String(retryError)
+        error: String(retryError),
       });
       sessionAwaitingFallbackResult.delete(sessionID);
       deps.sessionCompactionInFlight.delete(sessionID);
@@ -1139,18 +1161,19 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     }
     return retryDispatched;
   };
-  const resolveAgentForSessionFromContext = async (sessionID: string, eventAgent: string | undefined): Promise<string | undefined> => {
+  const resolveAgentForSessionFromContext = async (
+    sessionID: string,
+    eventAgent: string | undefined,
+  ): Promise<string | undefined> => {
     const resolved = resolveAgentForSession(sessionID, eventAgent);
-    if (resolved)
-      return resolved;
+    if (resolved) return resolved;
     try {
       const messagesResp: any = await ctx.client.session.messages({
         path: { id: sessionID },
-        query: { directory: ctx.directory }
+        query: { directory: ctx.directory },
       });
       const msgs: any[] = messagesResp.data;
-      if (!msgs || msgs.length === 0)
-        return undefined;
+      if (!msgs || msgs.length === 0) return undefined;
       for (let i = msgs.length - 1; i >= 0; i--) {
         const info = msgs[i]?.info;
         const infoAgent = typeof info?.agent === "string" ? info.agent : undefined;
@@ -1210,7 +1233,7 @@ function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
     getOrCreateFallbackState,
     notifyFallback,
     notifyExhausted,
-    notifyRecovered
+    notifyRecovered,
   };
 }
 
@@ -1222,21 +1245,13 @@ function normalizeMessage(value: string): string {
   return value.trim().length === 0 ? "" : value.toLowerCase();
 }
 function getErrorMessage(error: unknown): string {
-  if (!error)
-    return "";
-  if (typeof error === "string")
-    return normalizeMessage(error);
+  if (!error) return "";
+  if (typeof error === "string") return normalizeMessage(error);
   const errorObj = error as Record<string, any>;
-  const paths = [
-    errorObj.data?.error,
-    errorObj.data,
-    errorObj.error,
-    errorObj
-  ];
+  const paths = [errorObj.data?.error, errorObj.data, errorObj.error, errorObj];
   for (const obj of paths) {
     const record = getObjectRecord(obj);
-    if (!record || !("message" in record))
-      continue;
+    if (!record || !("message" in record)) continue;
     const rawMessage = record.message;
     if (typeof rawMessage === "string") {
       return normalizeMessage(rawMessage);
@@ -1249,8 +1264,7 @@ function getErrorMessage(error: unknown): string {
   }
 }
 function extractStatusCode(error: unknown, retryOnErrors?: number[]): number | undefined {
-  if (!error)
-    return undefined;
+  if (!error) return undefined;
   const errorObj = error as Record<string, any>;
   const statusCode = errorObj.statusCode ?? errorObj.status ?? errorObj.data?.statusCode;
   if (typeof statusCode === "number") {
@@ -1264,7 +1278,10 @@ function extractStatusCode(error: unknown, retryOnErrors?: number[]): number | u
   }
   const codes = retryOnErrors ?? DEFAULT_CONFIG.retry_on_errors;
   const message = getErrorMessage(error);
-  const contextualPattern = new RegExp(`(?:status(?:\\s+code)?|code|http)D*(${codes.join("|")})\\b|\\b(${codes.join("|")})\\b(?=\x00|[^0-9])`, "i");
+  const contextualPattern = new RegExp(
+    `(?:status(?:\\s+code)?|code|http)D*(${codes.join("|")})\\b|\\b(${codes.join("|")})\\b(?=\x00|[^0-9])`,
+    "i",
+  );
   const statusMatch = message.match(contextualPattern);
   const extracted = statusMatch?.[1] ?? statusMatch?.[2];
   if (extracted) {
@@ -1273,8 +1290,7 @@ function extractStatusCode(error: unknown, retryOnErrors?: number[]): number | u
   return undefined;
 }
 function extractErrorName(error: unknown): string | undefined {
-  if (!error || typeof error !== "object")
-    return undefined;
+  if (!error || typeof error !== "object") return undefined;
   const errorObj = error as Record<string, any>;
   const directName = errorObj.name;
   if (typeof directName === "string" && directName.length > 0) {
@@ -1295,43 +1311,51 @@ function extractErrorName(error: unknown): string | undefined {
 function classifyErrorType(error: unknown): string | undefined {
   const message = getErrorMessage(error);
   const errorName = extractErrorName(error)?.toLowerCase();
-  if (errorName?.includes("loadapi") || /api.?key.?is.?missing/i.test(message) && /environment variable/i.test(message) || /(?:x-api-key|api key).*(?:is required|missing|required)/i.test(message) || /(?:missing|required).*(?:x-api-key|api key)/i.test(message)) {
+  if (
+    errorName?.includes("loadapi") ||
+    (/api.?key.?is.?missing/i.test(message) && /environment variable/i.test(message)) ||
+    /(?:x-api-key|api key).*(?:is required|missing|required)/i.test(message) ||
+    /(?:missing|required).*(?:x-api-key|api key)/i.test(message)
+  ) {
     return "missing_api_key";
   }
-  if (/api.?key/i.test(message) && /must be a string/i.test(message) || /incorrect api key provided/i.test(message) || /api key not valid/i.test(message) || /invalid api key/i.test(message)) {
+  if (
+    (/api.?key/i.test(message) && /must be a string/i.test(message)) ||
+    /incorrect api key provided/i.test(message) ||
+    /api key not valid/i.test(message) ||
+    /invalid api key/i.test(message)
+  ) {
     return "invalid_api_key";
   }
   if (errorName?.includes("unknownerror") && /model\s+not\s+found/i.test(message)) {
     return "model_not_found";
   }
-  if (/model\s+(?:is\s+)?not\s+(?:found|supported|available)/i.test(message) || /the model .+ does not exist/i.test(message)) {
+  if (
+    /model\s+(?:is\s+)?not\s+(?:found|supported|available)/i.test(message) ||
+    /the model .+ does not exist/i.test(message)
+  ) {
     return "model_not_found";
   }
   return undefined;
 }
 const AUTO_RETRY_PATTERNS = [
   (combined: string) => /retrying\s+in/i.test(combined),
-  (combined: string) => /(?:too\s+many\s+requests|quota\s*exceeded|usage\s+limit|rate\s+limit|limit\s+reached)/i.test(combined)
+  (combined: string) =>
+    /(?:too\s+many\s+requests|quota\s*exceeded|usage\s+limit|rate\s+limit|limit\s+reached)/i.test(combined),
 ];
 function extractAutoRetrySignal(info: any): { signal: string } | undefined {
-  if (!info)
-    return undefined;
+  if (!info) return undefined;
   const candidates: string[] = [];
   const directStatus = info.status;
-  if (typeof directStatus === "string")
-    candidates.push(directStatus);
+  if (typeof directStatus === "string") candidates.push(directStatus);
   const summary = info.summary;
-  if (typeof summary === "string")
-    candidates.push(summary);
+  if (typeof summary === "string") candidates.push(summary);
   const message = info.message;
-  if (typeof message === "string")
-    candidates.push(message);
+  if (typeof message === "string") candidates.push(message);
   const details = info.details;
-  if (typeof details === "string")
-    candidates.push(details);
+  if (typeof details === "string") candidates.push(details);
   const combined = candidates.join("\n");
-  if (!combined)
-    return undefined;
+  if (!combined) return undefined;
   const isAutoRetry = AUTO_RETRY_PATTERNS.every((test) => test(combined));
   if (isAutoRetry) {
     return { signal: combined };
@@ -1339,8 +1363,7 @@ function extractAutoRetrySignal(info: any): { signal: string } | undefined {
   return undefined;
 }
 function containsErrorContent(parts?: any[]): { hasError: boolean; errorMessage?: string } {
-  if (!parts || parts.length === 0)
-    return { hasError: false };
+  if (!parts || parts.length === 0) return { hasError: false };
   const errorParts = parts.filter((p) => p.type === "error");
   if (errorParts.length > 0) {
     const errorMessages = errorParts.map((p) => p.text).filter((text): text is string => typeof text === "string");
@@ -1350,11 +1373,12 @@ function containsErrorContent(parts?: any[]): { hasError: boolean; errorMessage?
   return { hasError: false };
 }
 function detectErrorInTextParts(parts?: any[]): { hasError: boolean; errorType?: string; errorMessage?: string } {
-  if (!parts || parts.length === 0)
-    return { hasError: false };
-  const textContent = parts.filter((p) => p.type === "text" && typeof p.text === "string" && p.text.length > 0).map((p) => p.text).join("\n");
-  if (!textContent)
-    return { hasError: false };
+  if (!parts || parts.length === 0) return { hasError: false };
+  const textContent = parts
+    .filter((p) => p.type === "text" && typeof p.text === "string" && p.text.length > 0)
+    .map((p) => p.text)
+    .join("\n");
+  if (!textContent) return { hasError: false };
   const errorType = classifyErrorType({ message: textContent, name: "TextContent" });
   if (errorType) {
     return { hasError: true, errorType, errorMessage: textContent };
@@ -1362,8 +1386,7 @@ function detectErrorInTextParts(parts?: any[]): { hasError: boolean; errorType?:
   return { hasError: false };
 }
 function extractErrorContentFromParts(parts?: any[]): { hasError: boolean; errorMessage?: string } {
-  if (!parts || parts.length === 0)
-    return { hasError: false };
+  if (!parts || parts.length === 0) return { hasError: false };
   const errorParts = parts.filter((p) => p.type === "error" && typeof p.text === "string" && p.text.length > 0);
   if (errorParts.length > 0) {
     const errorMessage = errorParts.map((p) => p.text).join("\n");
@@ -1391,8 +1414,7 @@ function isRetryableError(error: unknown, retryOnErrors: number[], userPatterns:
     for (const patternStr of userPatterns) {
       try {
         const re = new RegExp(patternStr, "i");
-        if (re.test(message))
-          return true;
+        if (re.test(message)) return true;
       } catch {}
     }
   }
@@ -1400,7 +1422,10 @@ function isRetryableError(error: unknown, retryOnErrors: number[], userPatterns:
 }
 
 // event-handler.ts
-function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
+function createEventHandler(
+  deps: EngineDeps,
+  helpers: AutoRetryHelpers,
+): {
   handleEvent: (args: { event: any }) => Promise<void>;
   handleActivity: (sessionID: string, activityModel?: string) => Promise<void>;
 } {
@@ -1410,16 +1435,16 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     sessionLastAccess,
     sessionRetryInFlight,
     sessionAwaitingFallbackResult,
-    sessionFallbackTimeouts
+    sessionFallbackTimeouts,
   } = deps;
   const handleActivity = async (sessionID: string, activityModel?: string): Promise<void> => {
     if (activityModel && sessionAwaitingFallbackResult.has(sessionID)) {
       const state = sessionStates.get(sessionID);
-      if (state && state.failedModels.has(activityModel)) {
+      if (state?.failedModels.has(activityModel)) {
         logInfo("Ignoring activity from already-failed model", {
           sessionID,
           activityModel,
-          currentModel: state.currentModel
+          currentModel: state.currentModel,
         });
         return;
       }
@@ -1443,15 +1468,14 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
       helpers.scheduleSessionFallbackTimeout(parentID, resolvedAgent);
       logInfo("Resetting parent fallback timeout due to child activity", {
         sessionID,
-        parentID
+        parentID,
       });
     }
   };
   const handleSessionCreated = (props: any): void => {
     const sessionInfo = props?.info;
     const sessionID = sessionInfo?.id;
-    if (!sessionID)
-      return;
+    if (!sessionID) return;
     const parentID = sessionInfo?.parentID;
     if (typeof parentID === "string" && parentID.length > 0) {
       deps.sessionParentID.set(sessionID, parentID);
@@ -1479,8 +1503,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
   };
   const handleSessionStop = async (props: any): Promise<void> => {
     const sessionID = props?.sessionID;
-    if (!sessionID)
-      return;
+    if (!sessionID) return;
     helpers.clearSessionFallbackTimeout(sessionID);
     if (sessionRetryInFlight.has(sessionID) || sessionAwaitingFallbackResult.has(sessionID)) {
       await helpers.abortSessionRequest(sessionID, "session.stop");
@@ -1497,22 +1520,20 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
   };
   const handleSessionIdle = async (props: any): Promise<void> => {
     const sessionID = props?.sessionID;
-    if (!sessionID)
-      return;
+    if (!sessionID) return;
     const idleResolvers = deps.sessionIdleResolvers.get(sessionID);
     if (idleResolvers && idleResolvers.length > 0) {
       logInfo("session.idle resolving waiters", {
         sessionID,
-        waiterCount: idleResolvers.length
+        waiterCount: idleResolvers.length,
       });
-      for (const resolve of idleResolvers)
-        resolve();
+      for (const resolve of idleResolvers) resolve();
       deps.sessionIdleResolvers.delete(sessionID);
     }
     if (sessionAwaitingFallbackResult.has(sessionID)) {
       if (deps.sessionCompactionInFlight.has(sessionID)) {
         logInfo("session.idle during compaction in-flight \u2014 not a silent failure, waiting for session.compacted", {
-          sessionID
+          sessionID,
         });
         return;
       }
@@ -1523,11 +1544,11 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           logInfo("session.idle detected silent model failure (no first token received)", {
             sessionID,
             currentModel: state.currentModel,
-            attemptCount: state.attemptCount
+            attemptCount: state.attemptCount,
           });
           if (sessionRetryInFlight.has(sessionID)) {
             logInfo("session.idle silent failure \u2014 retry already in flight, skipping", {
-              sessionID
+              sessionID,
             });
             return;
           }
@@ -1536,20 +1557,31 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           helpers.clearSessionFallbackTimeout(sessionID);
           try {
             const resolvedAgent = await helpers.resolveAgentForSessionFromContext(sessionID, undefined);
-            const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
+            const fallbackModels = getFallbackModelsForSession(
+              sessionID,
+              resolvedAgent,
+              deps.agentConfigs,
+              deps.globalFallbackModels,
+            );
             if (fallbackModels.length === 0) {
               logInfo("session.idle silent failure \u2014 no fallback models configured", {
-                sessionID
+                sessionID,
               });
               return;
             }
             const plan = planFallback(sessionID, state, fallbackModels, config);
             if (plan.success) {
-              await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.idle.silent-failure", plan);
+              await helpers.autoRetryWithFallback(
+                sessionID,
+                plan.newModel,
+                resolvedAgent,
+                "session.idle.silent-failure",
+                plan,
+              );
             } else {
               logInfo("session.idle silent failure \u2014 no more fallback models available", {
                 sessionID,
-                error: plan.error
+                error: plan.error,
               });
             }
           } finally {
@@ -1559,7 +1591,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         }
       }
       logInfo("session.idle with first token received \u2014 fallback model completed", {
-        sessionID
+        sessionID,
       });
       sessionAwaitingFallbackResult.delete(sessionID);
       helpers.clearSessionFallbackTimeout(sessionID);
@@ -1587,25 +1619,31 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     fallbackModels: string[],
     resolvedAgent: string | undefined,
     status: any,
-    source: string
+    source: string,
   ): Promise<void> => {
     state.modelRetryCount = (state.modelRetryCount || 0) + 1;
     if (state.modelRetryCount < MAX_MODEL_RETRIES) {
-      logInfo(`${source} \u2014 current fallback model is healthy, staying on it (retry ${state.modelRetryCount}/${MAX_MODEL_RETRIES})`, {
-        sessionID,
-        originalModel: state.originalModel,
-        currentModel: state.currentModel,
-        modelRetryCount: state.modelRetryCount
-      });
+      logInfo(
+        `${source} \u2014 current fallback model is healthy, staying on it (retry ${state.modelRetryCount}/${MAX_MODEL_RETRIES})`,
+        {
+          sessionID,
+          originalModel: state.originalModel,
+          currentModel: state.currentModel,
+          modelRetryCount: state.modelRetryCount,
+        },
+      );
       await helpers.autoRetryWithFallback(sessionID, state.currentModel, resolvedAgent, source, undefined);
       return;
     }
-    logInfo(`${source} \u2014 current fallback model failed ${state.modelRetryCount} consecutive retries, advancing to next fallback`, {
-      sessionID,
-      originalModel: state.originalModel,
-      currentModel: state.currentModel,
-      modelRetryCount: state.modelRetryCount
-    });
+    logInfo(
+      `${source} \u2014 current fallback model failed ${state.modelRetryCount} consecutive retries, advancing to next fallback`,
+      {
+        sessionID,
+        originalModel: state.originalModel,
+        currentModel: state.currentModel,
+        modelRetryCount: state.modelRetryCount,
+      },
+    );
     state.failedModels.set(state.currentModel, Date.now());
     state.modelRetryCount = 0;
     const plan = planFallback(sessionID, state, fallbackModels, config);
@@ -1615,18 +1653,18 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         newModel: plan.newModel,
         prefixMessage: status.message || "Provider retrying",
         attemptCount: state.attemptCount + 1,
-        totalFallbackModels: fallbackModels.length
+        totalFallbackModels: fallbackModels.length,
       });
       await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, source, plan);
     } else if (!plan.success) {
       logError(`${source} fallback failed`, {
         sessionID,
-        error: plan.error
+        error: plan.error,
       });
       if (plan.maxAttemptsReached) {
         await helpers.notifyExhausted({
           totalFallbackModels: fallbackModels.length,
-          attemptCount: state.attemptCount
+          attemptCount: state.attemptCount,
         });
       }
     }
@@ -1635,8 +1673,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     const sessionID = props?.sessionID;
     const status = props?.status;
     const agent = props?.agent;
-    if (!sessionID || !status || status.type !== "retry")
-      return;
+    if (!sessionID || !status || status.type !== "retry") return;
     if (sessionRetryInFlight.has(sessionID)) {
       logInfo("session.status skipped -- retry lock already held", { sessionID });
       return;
@@ -1644,25 +1681,32 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     sessionRetryInFlight.add(sessionID);
     try {
       const resolvedAgent = await helpers.resolveAgentForSessionFromContext(sessionID, agent);
-      const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
+      const fallbackModels = getFallbackModelsForSession(
+        sessionID,
+        resolvedAgent,
+        deps.agentConfigs,
+        deps.globalFallbackModels,
+      );
       logInfo("Provider retry detected", {
         sessionID,
         attempt: status.attempt,
         message: status.message,
         nextRetryMs: status.next,
         resolvedAgent,
-        totalFallbackModels: fallbackModels.length
+        totalFallbackModels: fallbackModels.length,
       });
       if (fallbackModels.length === 0) {
         if (config.notify_on_fallback) {
-          await deps.ctx.client.tui.showToast({
-            body: {
-              title: "Provider Retrying",
-              variant: "info",
-              duration: 3000,
-              message: `${status.message || "retrying..."} (no fallback models configured)`
-            }
-          }).catch(() => {});
+          await deps.ctx.client.tui
+            .showToast({
+              body: {
+                title: "Provider Retrying",
+                variant: "info",
+                duration: 3000,
+                message: `${status.message || "retrying..."} (no fallback models configured)`,
+              },
+            })
+            .catch(() => {});
         }
         return;
       }
@@ -1676,7 +1720,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
             nextRetryMs,
             now,
             timeoutMs,
-            diffSeconds: Math.round((nextRetryMs - now) / 1000)
+            diffSeconds: Math.round((nextRetryMs - now) / 1000),
           });
           await triggerImmediateFallback(sessionID, resolvedAgent, fallbackModels, status);
           return;
@@ -1685,7 +1729,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
       const isNewState = !sessionStates.has(sessionID);
       const state = helpers.getOrCreateFallbackState(sessionID, {
         resolvedAgent,
-        allowFirstAgentFallback: true
+        allowFirstAgentFallback: true,
       });
       if (!state) {
         logInfo("No model info for session.status fallback", { sessionID });
@@ -1695,13 +1739,23 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         logInfo("Creating on-demand state for session.status", {
           sessionID,
           model: state.originalModel,
-          agent: resolvedAgent
+          agent: resolvedAgent,
         });
       }
       sessionAwaitingFallbackResult.delete(sessionID);
       helpers.clearSessionFallbackTimeout(sessionID);
-      if (state.currentModel !== state.originalModel && !isModelInCooldown(state.currentModel, state, config.cooldown_seconds)) {
-        await handleStayOnFallback(sessionID, state, fallbackModels, resolvedAgent, status, "session.status.stay-on-fallback");
+      if (
+        state.currentModel !== state.originalModel &&
+        !isModelInCooldown(state.currentModel, state, config.cooldown_seconds)
+      ) {
+        await handleStayOnFallback(
+          sessionID,
+          state,
+          fallbackModels,
+          resolvedAgent,
+          status,
+          "session.status.stay-on-fallback",
+        );
         return;
       }
       const plan = planFallback(sessionID, state, fallbackModels, config);
@@ -1711,18 +1765,18 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           newModel: plan.newModel,
           prefixMessage: status.message || "Provider retrying",
           attemptCount: state.attemptCount + 1,
-          totalFallbackModels: fallbackModels.length
+          totalFallbackModels: fallbackModels.length,
         });
         await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.status", plan);
       } else if (!plan.success) {
         logError("session.status fallback failed", {
           sessionID,
-          error: plan.error
+          error: plan.error,
         });
         if (plan.maxAttemptsReached) {
           await helpers.notifyExhausted({
             totalFallbackModels: fallbackModels.length,
-            attemptCount: state.attemptCount
+            attemptCount: state.attemptCount,
           });
         }
       }
@@ -1742,7 +1796,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     if (deps.sessionCompactionInFlight.has(sessionID)) {
       logInfo("Ignoring session.error during compaction in-flight", {
         sessionID,
-        errorName: extractErrorName(error)
+        errorName: extractErrorName(error),
       });
       return;
     }
@@ -1754,7 +1808,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         sessionID,
         msSinceAbort: Date.now() - selfAbortTs,
         awaitingFallback: sessionAwaitingFallbackResult.has(sessionID),
-        retryInFlight: sessionRetryInFlight.has(sessionID)
+        retryInFlight: sessionRetryInFlight.has(sessionID),
       });
       return;
     }
@@ -1764,7 +1818,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         sessionID,
         pendingFallbackModel: currentState.pendingFallbackModel,
         currentModel: currentState.currentModel,
-        errorName: extractErrorName(error)
+        errorName: extractErrorName(error),
       });
       return;
     }
@@ -1773,7 +1827,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         sessionID,
         staleModel: errorModel,
         currentModel: currentState.currentModel,
-        errorName: extractErrorName(error)
+        errorName: extractErrorName(error),
       });
       return;
     }
@@ -1782,7 +1836,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         sessionID,
         errorModel,
         currentModel: currentState.currentModel,
-        errorName: extractErrorName(error)
+        errorName: extractErrorName(error),
       });
       return;
     }
@@ -1790,14 +1844,14 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
       logInfo("Ignoring session.error while awaiting fallback result (likely stale abort)", {
         sessionID,
         currentModel: currentState?.currentModel,
-        errorName: extractErrorName(error)
+        errorName: extractErrorName(error),
       });
       return;
     }
     if (sessionRetryInFlight.has(sessionID)) {
       logInfo("session.error skipped -- retry in flight (early lock)", {
         sessionID,
-        retryInFlight: true
+        retryInFlight: true,
       });
       return;
     }
@@ -1808,7 +1862,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         logInfo("session.error skipping \u2014 compaction already being handled by message.updated", {
           sessionID,
           resolvedAgent,
-          errorName: extractErrorName(error)
+          errorName: extractErrorName(error),
         });
         return;
       }
@@ -1819,7 +1873,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           sessionID,
           pendingFallbackModel: stateAfterAwait.pendingFallbackModel,
           currentModel: stateAfterAwait.currentModel,
-          errorName: extractErrorName(error)
+          errorName: extractErrorName(error),
         });
         return;
       }
@@ -1829,11 +1883,16 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         resolvedAgent,
         statusCode: extractStatusCode(error, config.retry_on_errors),
         errorName: extractErrorName(error),
-        errorType: classifyErrorType(error)
+        errorType: classifyErrorType(error),
       });
       const isRetryable = isRetryableError(error, config.retry_on_errors, config.retryable_error_patterns);
       let state = sessionStates.get(sessionID);
-      const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
+      const fallbackModels = getFallbackModelsForSession(
+        sessionID,
+        resolvedAgent,
+        deps.agentConfigs,
+        deps.globalFallbackModels,
+      );
       if (fallbackModels.length === 0) {
         logInfo("No fallback models configured", { sessionID, agent });
         return;
@@ -1846,7 +1905,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           inFallbackChain: false,
           statusCode: extractStatusCode(error, config.retry_on_errors),
           errorName: extractErrorName(error),
-          errorType: classifyErrorType(error)
+          errorType: classifyErrorType(error),
         });
         return;
       }
@@ -1857,7 +1916,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           inFallbackChain: true,
           currentModel: state?.currentModel,
           originalModel: state?.originalModel,
-          errorName: extractErrorName(error)
+          errorName: extractErrorName(error),
         });
       }
       if (!state) {
@@ -1867,7 +1926,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         } else if (!errorModel && sessionRetryInFlight.has(sessionID)) {
           logInfo("Deferring to message.updated handler (no state, no errorModel, retry in flight)", {
             sessionID,
-            errorName: extractErrorName(error)
+            errorName: extractErrorName(error),
           });
           return;
         } else {
@@ -1877,7 +1936,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
             logInfo("Derived model from agent config", {
               sessionID,
               agent: resolvedAgent,
-              model: agentModel
+              model: agentModel,
             });
             state = helpers.getOrCreateFallbackState(sessionID, { preferredModel: agentModel });
           } else {
@@ -1885,7 +1944,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
             if (firstModel) {
               logInfo("Using first available agent model for state creation", {
                 sessionID,
-                model: firstModel
+                model: firstModel,
               });
               state = helpers.getOrCreateFallbackState(sessionID, { preferredModel: firstModel });
             } else {
@@ -1904,13 +1963,13 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
           title: "Model Fallback",
           newModel: plan.newModel,
           attemptCount: state.attemptCount + 1,
-          totalFallbackModels: fallbackModels.length
+          totalFallbackModels: fallbackModels.length,
         });
         await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.error", plan);
       } else {
         logError("Fallback preparation failed", {
           sessionID,
-          error: plan.error
+          error: plan.error,
         });
       }
     } finally {
@@ -1919,8 +1978,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
   };
   const handleSessionCompacted = (props: any): void => {
     const sessionID = props?.sessionID;
-    if (!sessionID)
-      return;
+    if (!sessionID) return;
     const hadAwaiting = sessionAwaitingFallbackResult.has(sessionID);
     const hadCompaction = deps.sessionCompactionInFlight.has(sessionID);
     sessionAwaitingFallbackResult.delete(sessionID);
@@ -1936,11 +1994,11 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     sessionID: string,
     resolvedAgent: string | undefined,
     fallbackModels: string[],
-    status: any
+    status: any,
   ): Promise<void> {
     const state = helpers.getOrCreateFallbackState(sessionID, {
       resolvedAgent,
-      allowFirstAgentFallback: true
+      allowFirstAgentFallback: true,
     });
     if (!state) {
       logError("Cannot trigger immediate fallback - no model info", { sessionID });
@@ -1948,8 +2006,18 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
     }
     sessionAwaitingFallbackResult.delete(sessionID);
     helpers.clearSessionFallbackTimeout(sessionID);
-    if (state.currentModel !== state.originalModel && !isModelInCooldown(state.currentModel, state, config.cooldown_seconds)) {
-      await handleStayOnFallback(sessionID, state, fallbackModels, resolvedAgent, status, "session.status.immediate-stay-on-fallback");
+    if (
+      state.currentModel !== state.originalModel &&
+      !isModelInCooldown(state.currentModel, state, config.cooldown_seconds)
+    ) {
+      await handleStayOnFallback(
+        sessionID,
+        state,
+        fallbackModels,
+        resolvedAgent,
+        status,
+        "session.status.immediate-stay-on-fallback",
+      );
       return;
     }
     const plan = planFallback(sessionID, state, fallbackModels, config);
@@ -1958,25 +2026,24 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         title: "Provider Retry Too Slow - Switching Model",
         newModel: plan.newModel,
         prefixMessage: status.message || "Provider retrying",
-        immediate: true
+        immediate: true,
       });
       await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.status.immediate", plan);
     } else if (!plan.success) {
       logError("Immediate fallback preparation failed", {
         sessionID,
-        error: plan.error
+        error: plan.error,
       });
       if (plan.maxAttemptsReached) {
         await helpers.notifyExhausted({
-          totalFallbackModels: fallbackModels.length
+          totalFallbackModels: fallbackModels.length,
         });
       }
     }
   }
   return {
     handleEvent: async ({ event }: { event: any }): Promise<void> => {
-      if (!config.enabled)
-        return;
+      if (!config.enabled) return;
       const props = event.properties;
       if (event.type === "session.created") {
         handleSessionCreated(props);
@@ -2007,7 +2074,7 @@ function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
         return;
       }
     },
-    handleActivity
+    handleActivity,
   };
 }
 
@@ -2017,25 +2084,23 @@ function hasVisibleAssistantResponse(extractAutoRetrySignalFn: (info: any) => { 
     try {
       const messagesResp: any = await ctx.client.session.messages({
         path: { id: sessionID },
-        query: { directory: ctx.directory }
+        query: { directory: ctx.directory },
       });
       const msgs: any[] = messagesResp.data;
-      if (!msgs || msgs.length === 0)
-        return false;
+      if (!msgs || msgs.length === 0) return false;
       const lastAssistant = [...msgs].reverse().find((m) => m.info?.role === "assistant");
-      if (!lastAssistant)
-        return false;
-      if (lastAssistant.info?.error)
-        return false;
+      if (!lastAssistant) return false;
+      if (lastAssistant.info?.error) return false;
       const parts = lastAssistant.parts ?? lastAssistant.info?.parts;
       const hasToolCall = (parts ?? []).some((p: any) => p.type === "tool_call");
-      const textFromParts = (parts ?? []).filter((p: any) => p.type === "text" && typeof p.text === "string").map((p: any) => p.text.trim()).filter((text: string) => text.length > 0).join("\n");
-      if (hasToolCall)
-        return true;
-      if (!textFromParts)
-        return false;
-      if (extractAutoRetrySignalFn({ message: textFromParts }))
-        return false;
+      const textFromParts = (parts ?? [])
+        .filter((p: any) => p.type === "text" && typeof p.text === "string")
+        .map((p: any) => p.text.trim())
+        .filter((text: string) => text.length > 0)
+        .join("\n");
+      if (hasToolCall) return true;
+      if (!textFromParts) return false;
+      if (extractAutoRetrySignalFn({ message: textFromParts })) return false;
       return true;
     } catch {
       return false;
@@ -2046,35 +2111,24 @@ async function checkLastAssistantForErrorContent(ctx: PluginInput, sessionID: st
   try {
     const messagesResp: any = await ctx.client.session.messages({
       path: { id: sessionID },
-      query: { directory: ctx.directory }
+      query: { directory: ctx.directory },
     });
     const msgs: any[] = messagesResp.data;
-    if (!msgs || msgs.length === 0)
-      return undefined;
+    if (!msgs || msgs.length === 0) return undefined;
     const lastAssistant = [...msgs].reverse().find((m) => m.info?.role === "assistant");
-    if (!lastAssistant)
-      return undefined;
+    if (!lastAssistant) return undefined;
     const parts = lastAssistant.parts ?? lastAssistant.info?.parts;
     const result = extractErrorContentFromParts(parts);
-    if (result.hasError)
-      return result.errorMessage;
+    if (result.hasError) return result.errorMessage;
     const textResult = detectErrorInTextParts(parts);
-    if (textResult.hasError)
-      return textResult.errorMessage;
+    if (textResult.hasError) return textResult.errorMessage;
     return undefined;
   } catch {
     return undefined;
   }
 }
 function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers): (props: any) => Promise<void> {
-  const {
-    ctx,
-    config,
-    sessionStates,
-    sessionLastAccess,
-    sessionRetryInFlight,
-    sessionAwaitingFallbackResult
-  } = deps;
+  const { ctx, config, sessionStates, sessionLastAccess, sessionRetryInFlight, sessionAwaitingFallbackResult } = deps;
   const checkVisibleResponse = hasVisibleAssistantResponse(extractAutoRetrySignal);
   return async (props: any): Promise<void> => {
     const info = props?.info;
@@ -2084,12 +2138,21 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
     const timeoutEnabled = config.timeout_seconds > 0;
     const parts = props?.parts;
     const errorContentResult = containsErrorContent(parts);
-    let error = info?.error ?? (retrySignal && timeoutEnabled ? { name: "ProviderRateLimitError", message: retrySignal } : undefined) ?? (errorContentResult.hasError ? {
-      name: "MessageContentError",
-      message: errorContentResult.errorMessage || "Message contains error content"
-    } : undefined);
+    let error =
+      info?.error ??
+      (retrySignal && timeoutEnabled ? { name: "ProviderRateLimitError", message: retrySignal } : undefined) ??
+      (errorContentResult.hasError
+        ? {
+            name: "MessageContentError",
+            message: errorContentResult.errorMessage || "Message contains error content",
+          }
+        : undefined);
     const role = info?.role;
-    const model = info?.model ?? (typeof info?.providerID === "string" && typeof info?.modelID === "string" ? `${info.providerID}/${info.modelID}` : undefined);
+    const model =
+      info?.model ??
+      (typeof info?.providerID === "string" && typeof info?.modelID === "string"
+        ? `${info.providerID}/${info.modelID}`
+        : undefined);
     if (sessionID && role === "assistant") {
       deps.sessionLastMessageTime.set(sessionID, Date.now());
       if (model && deps.sessionLastMessageModel) {
@@ -2099,7 +2162,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
         sessionID,
         model,
         hasInfoError: !!info?.error,
-        errorType: info?.error ? classifyErrorType(info.error) : undefined
+        errorType: info?.error ? classifyErrorType(info.error) : undefined,
       });
     }
     if (sessionID && role === "assistant" && !error) {
@@ -2107,49 +2170,76 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
       if (errorContent) {
         logInfo("Detected error content in message parts", {
           sessionID,
-          errorContent: errorContent.slice(0, 200)
+          errorContent: errorContent.slice(0, 200),
         });
         error = { name: "ContentError", message: errorContent };
       }
     }
     if (sessionID && role === "assistant" && !error) {
       if (!sessionAwaitingFallbackResult.has(sessionID)) {
-        const needsTimeout = model && config.timeout_seconds > 0 && !deps.sessionFirstTokenReceived.get(sessionID) && !deps.sessionFallbackTimeouts.has(sessionID);
+        const needsTimeout =
+          model &&
+          config.timeout_seconds > 0 &&
+          !deps.sessionFirstTokenReceived.get(sessionID) &&
+          !deps.sessionFallbackTimeouts.has(sessionID);
         if (needsTimeout) {
           helpers.getOrCreateFallbackState(sessionID, { preferredModel: model });
           const agent = info?.agent;
-          helpers.resolveAgentForSessionFromContext(sessionID, agent).then((resolvedAgent) => {
-            const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
-            if (fallbackModels.length > 0) {
-              helpers.scheduleSessionFallbackTimeout(sessionID, resolvedAgent);
-              logInfo("Scheduled primary model TTFT timeout", {
+          helpers
+            .resolveAgentForSessionFromContext(sessionID, agent)
+            .then((resolvedAgent) => {
+              const fallbackModels = getFallbackModelsForSession(
                 sessionID,
-                model,
-                timeoutSeconds: config.timeout_seconds
-              });
-            }
-          }).catch(() => {});
+                resolvedAgent,
+                deps.agentConfigs,
+                deps.globalFallbackModels,
+              );
+              if (fallbackModels.length > 0) {
+                helpers.scheduleSessionFallbackTimeout(sessionID, resolvedAgent);
+                logInfo("Scheduled primary model TTFT timeout", {
+                  sessionID,
+                  model,
+                  timeoutSeconds: config.timeout_seconds,
+                });
+              }
+            })
+            .catch(() => {});
         } else if (sessionStates.has(sessionID)) {
-          const eventHasContent = parts?.some((p: any) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0 || p.type === "tool_call" || p.type === "tool");
+          const eventHasContent = parts?.some(
+            (p: any) =>
+              (p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0) ||
+              p.type === "tool_call" ||
+              p.type === "tool",
+          );
           if (eventHasContent) {
             deps.sessionFirstTokenReceived.set(sessionID, true);
           }
           if (deps.sessionFallbackTimeouts.has(sessionID)) {
             const agent = info?.agent;
-            helpers.resolveAgentForSessionFromContext(sessionID, agent).then((resolvedAgent) => {
-              helpers.scheduleSessionFallbackTimeout(sessionID, resolvedAgent);
-            }).catch(() => {});
+            helpers
+              .resolveAgentForSessionFromContext(sessionID, agent)
+              .then((resolvedAgent) => {
+                helpers.scheduleSessionFallbackTimeout(sessionID, resolvedAgent);
+              })
+              .catch(() => {});
           }
         }
         return;
       }
       const hasVisible = await checkVisibleResponse(ctx, sessionID, info);
       if (!hasVisible) {
-        const eventHasActivity = parts?.some((p: any) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0 || p.type === "tool_call");
+        const eventHasActivity = parts?.some(
+          (p: any) =>
+            (p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0) || p.type === "tool_call",
+        );
         if (eventHasActivity) {
           deps.sessionFirstTokenReceived.set(sessionID, true);
         }
-        logError("Assistant update observed without visible final response; keeping fallback timeout", { sessionID, model, firstTokenReceived: deps.sessionFirstTokenReceived.get(sessionID) ?? false });
+        logError("Assistant update observed without visible final response; keeping fallback timeout", {
+          sessionID,
+          model,
+          firstTokenReceived: deps.sessionFirstTokenReceived.get(sessionID) ?? false,
+        });
         return;
       }
       deps.sessionFirstTokenReceived.set(sessionID, true);
@@ -2161,7 +2251,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
       }
       logInfo("Assistant response observed; cleared fallback timeout", {
         sessionID,
-        model
+        model,
       });
       return;
     }
@@ -2170,7 +2260,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
         logInfo("Ignoring message.updated error during compaction in-flight", {
           sessionID,
           model,
-          errorName: extractErrorName(error)
+          errorName: extractErrorName(error),
         });
         return;
       }
@@ -2183,18 +2273,22 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
             sessionID,
             failedModel: model,
             currentModel: currentState.currentModel,
-            errorName: extractErrorName(error)
+            errorName: extractErrorName(error),
           });
         } else {
           const isAlreadyFailed = currentState.failedModels.has(model);
           const retryableStaleError = isRetryableError(error, config.retry_on_errors, config.retryable_error_patterns);
-          const canResyncToErrorModel = retryableStaleError && !isAlreadyFailed && !currentState.pendingFallbackModel && !sessionAwaitingFallbackResult.has(sessionID);
+          const canResyncToErrorModel =
+            retryableStaleError &&
+            !isAlreadyFailed &&
+            !currentState.pendingFallbackModel &&
+            !sessionAwaitingFallbackResult.has(sessionID);
           if (canResyncToErrorModel) {
             logInfo("Resyncing state to error model before fallback planning", {
               sessionID,
               previousModel: currentState.currentModel,
               errorModel: model,
-              errorName: extractErrorName(error)
+              errorName: extractErrorName(error),
             });
             currentState.currentModel = model;
             sessionLastAccess.set(sessionID, Date.now());
@@ -2204,7 +2298,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
               staleModel: model,
               currentModel: currentState.currentModel,
               errorName: extractErrorName(error),
-              isAlreadyFailed
+              isAlreadyFailed,
             });
             return;
           }
@@ -2219,14 +2313,14 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
           model,
           msSinceAbort: Date.now() - selfAbortTs,
           awaitingFallback: sessionAwaitingFallbackResult.has(sessionID),
-          retryInFlight: sessionRetryInFlight.has(sessionID)
+          retryInFlight: sessionRetryInFlight.has(sessionID),
         });
         return;
       }
       sessionAwaitingFallbackResult.delete(sessionID);
       if (sessionRetryInFlight.has(sessionID) && !retrySignal) {
         logInfo("message.updated fallback skipped (retry in flight)", {
-          sessionID
+          sessionID,
         });
         return;
       }
@@ -2248,7 +2342,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
           model,
           statusCode: extractStatusCode(error, config.retry_on_errors),
           errorName: extractErrorName(error),
-          errorType: classifyErrorType(error)
+          errorType: classifyErrorType(error),
         });
         let state = sessionStates.get(sessionID);
         const agent = info?.agent;
@@ -2260,33 +2354,46 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
           logInfo("Compaction failed on stale model \u2014 re-dispatching on current fallback", {
             sessionID,
             failedModel: model,
-            currentFallbackModel: state.currentModel
+            currentFallbackModel: state.currentModel,
           });
           deps.sessionCompactionInFlight.add(sessionID);
           if (config.notify_on_fallback) {
             const fromName = (model || "primary").split("/").pop();
             const toName = state.currentModel.split("/").pop() || state.currentModel;
-            deps.ctx.client.tui.showToast({
-              body: {
-                title: "Compaction Fallback",
-                message: `${fromName} failed \u2014 retrying compaction on ${toName}`,
-                variant: "warning",
-                duration: 5000
-              }
-            }).catch(() => {});
+            deps.ctx.client.tui
+              .showToast({
+                body: {
+                  title: "Compaction Fallback",
+                  message: `${fromName} failed \u2014 retrying compaction on ${toName}`,
+                  variant: "warning",
+                  duration: 5000,
+                },
+              })
+              .catch(() => {});
           }
-          await helpers.autoRetryWithFallback(sessionID, state.currentModel, "compaction", "message.updated.compaction-stale", undefined);
+          await helpers.autoRetryWithFallback(
+            sessionID,
+            state.currentModel,
+            "compaction",
+            "message.updated.compaction-stale",
+            undefined,
+          );
           return;
         }
-        const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
+        const fallbackModels = getFallbackModelsForSession(
+          sessionID,
+          resolvedAgent,
+          deps.agentConfigs,
+          deps.globalFallbackModels,
+        );
         if (fallbackModels.length === 0) {
           return;
         }
-        if (state && state.pendingFallbackModel && model !== state.pendingFallbackModel) {
+        if (state?.pendingFallbackModel && model !== state.pendingFallbackModel) {
           logInfo("Skipping duplicate fallback trigger (already in progress for different model)", {
             sessionID,
             pendingFallbackModel: state.pendingFallbackModel,
-            errorModel: model
+            errorModel: model,
           });
           return;
         }
@@ -2297,7 +2404,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
             sessionID,
             statusCode: extractStatusCode(error, config.retry_on_errors),
             errorName: extractErrorName(error),
-            errorType: classifyErrorType(error)
+            errorType: classifyErrorType(error),
           });
           return;
         }
@@ -2306,7 +2413,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
             sessionID,
             currentModel: state?.currentModel,
             originalModel: state?.originalModel,
-            errorName: extractErrorName(error)
+            errorName: extractErrorName(error),
           });
         }
         if (!state) {
@@ -2318,7 +2425,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
               logError("Derived model from agent config for message.updated", {
                 sessionID,
                 agent: resolvedAgent,
-                model: agentModel
+                model: agentModel,
               });
               initialModel = agentModel;
             }
@@ -2327,7 +2434,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
             logError("message.updated missing model info, cannot fallback", {
               sessionID,
               errorName: extractErrorName(error),
-              errorType: classifyErrorType(error)
+              errorType: classifyErrorType(error),
             });
             return;
           }
@@ -2337,7 +2444,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
           if (state.pendingFallbackModel && retrySignal && timeoutEnabled) {
             logError("Clearing pending fallback due to provider auto-retry signal", {
               sessionID,
-              pendingFallbackModel: state.pendingFallbackModel
+              pendingFallbackModel: state.pendingFallbackModel,
             });
             state.pendingFallbackModel = undefined;
           }
@@ -2346,7 +2453,7 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
         const plan = planFallback(sessionID, state, fallbackModels, config);
         if (plan.success) {
           helpers.notifyFallback({
-            newModel: plan.newModel
+            newModel: plan.newModel,
           });
           await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "message.updated", plan);
         }
@@ -2358,17 +2465,13 @@ function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers)
 }
 
 // chat-message-handler.ts
-function createChatMessageHandler(deps: EngineDeps, helpers: AutoRetryHelpers): (input: any, output: any) => Promise<void> {
-  const {
-    config,
-    sessionStates,
-    sessionLastAccess,
-    sessionRetryInFlight,
-    sessionAwaitingFallbackResult
-  } = deps;
+function createChatMessageHandler(
+  deps: EngineDeps,
+  helpers: AutoRetryHelpers,
+): (input: any, output: any) => Promise<void> {
+  const { config, sessionStates, sessionLastAccess, sessionRetryInFlight, sessionAwaitingFallbackResult } = deps;
   return async (input: any, output: any): Promise<void> => {
-    if (!config.enabled)
-      return;
+    if (!config.enabled) return;
     const { sessionID } = input;
     let state = sessionStates.get(sessionID);
     if (!state) {
@@ -2376,11 +2479,18 @@ function createChatMessageHandler(deps: EngineDeps, helpers: AutoRetryHelpers): 
     }
     sessionLastAccess.set(sessionID, Date.now());
     const requestedModel = input.model ? `${input.model.providerID}/${input.model.modelID}` : undefined;
-    if (requestedModel && requestedModel === state.currentModel && state.currentModel !== state.originalModel && !deps.sessionCompactionInFlight.has(sessionID) && !sessionRetryInFlight.has(sessionID) && !sessionAwaitingFallbackResult.has(sessionID)) {
+    if (
+      requestedModel &&
+      requestedModel === state.currentModel &&
+      state.currentModel !== state.originalModel &&
+      !deps.sessionCompactionInFlight.has(sessionID) &&
+      !sessionRetryInFlight.has(sessionID) &&
+      !sessionAwaitingFallbackResult.has(sessionID)
+    ) {
       logInfo("Adopting current model as new primary (user confirmed manual selection)", {
         sessionID,
         model: requestedModel,
-        previousOriginal: state.originalModel
+        previousOriginal: state.originalModel,
       });
       state.originalModel = requestedModel;
       state.failedModels.clear();
@@ -2394,7 +2504,7 @@ function createChatMessageHandler(deps: EngineDeps, helpers: AutoRetryHelpers): 
         if (recovered) {
           logInfo("Recovered to primary model", {
             sessionID,
-            model: state.originalModel
+            model: state.originalModel,
           });
           helpers.notifyRecovered(state.originalModel);
         }
@@ -2411,14 +2521,14 @@ function createChatMessageHandler(deps: EngineDeps, helpers: AutoRetryHelpers): 
           requestedModel,
           currentModel: state.currentModel,
           retryInFlight: sessionRetryInFlight.has(sessionID),
-          awaitingResult: sessionAwaitingFallbackResult.has(sessionID)
+          awaitingResult: sessionAwaitingFallbackResult.has(sessionID),
         });
         return;
       }
       logError("Detected manual model change, resetting fallback state", {
         sessionID,
         from: state.currentModel,
-        to: requestedModel
+        to: requestedModel,
       });
       helpers.clearSessionFallbackTimeout(sessionID);
       sessionAwaitingFallbackResult.delete(sessionID);
@@ -2431,20 +2541,19 @@ function createChatMessageHandler(deps: EngineDeps, helpers: AutoRetryHelpers): 
       sessionStates.set(sessionID, state);
       return;
     }
-    if (state.currentModel === state.originalModel)
-      return;
+    if (state.currentModel === state.originalModel) return;
     const activeModel = state.currentModel;
     logInfo("Applying fallback model override", {
       sessionID,
       from: input.model,
-      to: activeModel
+      to: activeModel,
     });
     if (output.message && activeModel) {
       const parts = activeModel.split("/");
       if (parts.length >= 2) {
         output.message.model = {
           providerID: parts[0],
-          modelID: parts.slice(1).join("/")
+          modelID: parts.slice(1).join("/"),
         };
       }
     }
@@ -2459,43 +2568,40 @@ function isEmptyTaskResult(output?: string): boolean {
 }
 const TASK_ID_REGEX = /task_id:\s*(ses_[a-zA-Z0-9]+)/;
 function extractChildSessionID(output?: string): string | null {
-  if (!output)
-    return null;
+  if (!output) return null;
   const match = output.match(TASK_ID_REGEX);
   return match ? match[1] : null;
 }
 function getSessionStatusType(sessionData: any): string | undefined {
   const status = sessionData?.status;
-  if (!status)
-    return undefined;
-  if (typeof status === "string")
-    return status;
+  if (!status) return undefined;
+  if (typeof status === "string") return status;
   if (typeof status === "object" && status !== null && "type" in status) {
     return status.type;
   }
   return undefined;
 }
-function waitForSessionIdle(deps: EngineDeps, sessionID: string, inactivityMs: number, pollIntervalMs = 2000): Promise<boolean> {
+function waitForSessionIdle(
+  deps: EngineDeps,
+  sessionID: string,
+  inactivityMs: number,
+  pollIntervalMs = 2000,
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     let pollTimer: ReturnType<typeof setInterval> | undefined;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     let lastSeenMessageTime = deps.sessionLastMessageTime.get(sessionID) ?? Date.now();
     const settle = (result: boolean): void => {
-      if (settled)
-        return;
+      if (settled) return;
       settled = true;
-      if (pollTimer)
-        clearInterval(pollTimer);
-      if (timeoutTimer)
-        clearTimeout(timeoutTimer);
+      if (pollTimer) clearInterval(pollTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       const resolvers = deps.sessionIdleResolvers.get(sessionID);
       if (resolvers) {
         const idx = resolvers.indexOf(onIdleRef);
-        if (idx >= 0)
-          resolvers.splice(idx, 1);
-        if (resolvers.length === 0)
-          deps.sessionIdleResolvers.delete(sessionID);
+        if (idx >= 0) resolvers.splice(idx, 1);
+        if (resolvers.length === 0) deps.sessionIdleResolvers.delete(sessionID);
       }
       resolve(result);
     };
@@ -2507,28 +2613,28 @@ function waitForSessionIdle(deps: EngineDeps, sessionID: string, inactivityMs: n
     }
     resolvers.push(onIdleRef);
     const resetTimeout = (): void => {
-      if (timeoutTimer)
-        clearTimeout(timeoutTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => settle(false), inactivityMs);
     };
     resetTimeout();
     const pollStatus = (): void => {
-      if (settled)
-        return;
+      if (settled) return;
       const currentMessageTime = deps.sessionLastMessageTime.get(sessionID);
       if (currentMessageTime && currentMessageTime > lastSeenMessageTime) {
         lastSeenMessageTime = currentMessageTime;
         resetTimeout();
       }
-      deps.ctx.client.session.get({ path: { id: sessionID } }).then((sessionInfo: any) => {
-        if (settled)
-          return;
-        const statusType = getSessionStatusType(sessionInfo?.data ?? sessionInfo);
-        if (statusType === "idle") {
-          logInfo(`[subagent-sync] Polling detected child ${sessionID} idle`);
-          settle(true);
-        }
-      }).catch(() => {});
+      deps.ctx.client.session
+        .get({ path: { id: sessionID } })
+        .then((sessionInfo: any) => {
+          if (settled) return;
+          const statusType = getSessionStatusType(sessionInfo?.data ?? sessionInfo);
+          if (statusType === "idle") {
+            logInfo(`[subagent-sync] Polling detected child ${sessionID} idle`);
+            settle(true);
+          }
+        })
+        .catch(() => {});
     };
     pollStatus();
     pollTimer = setInterval(pollStatus, pollIntervalMs);
@@ -2537,7 +2643,7 @@ function waitForSessionIdle(deps: EngineDeps, sessionID: string, inactivityMs: n
 async function waitForChildFallbackResult(
   deps: EngineDeps,
   childSessionID: string,
-  options?: { maxWaitMs?: number; pollIntervalMs?: number }
+  options?: { maxWaitMs?: number; pollIntervalMs?: number },
 ): Promise<string | null> {
   const maxWaitMs = options?.maxWaitMs ?? Math.min((deps.config.timeout_seconds || 120) * 1000, 120000);
   const pollIntervalMs = options?.pollIntervalMs ?? 500;
@@ -2568,16 +2674,13 @@ async function extractAssistantResponse(deps: EngineDeps, childSessionID: string
   try {
     const msgs: any = await deps.ctx.client.session.messages({
       path: { id: childSessionID },
-      query: { directory: deps.ctx.directory }
+      query: { directory: deps.ctx.directory },
     });
-    if (!msgs.data || msgs.data.length === 0)
-      return null;
+    if (!msgs.data || msgs.data.length === 0) return null;
     const lastAssistant = [...msgs.data].reverse().find((m: any) => m.info?.role === "assistant");
-    if (!lastAssistant?.parts)
-      return null;
+    if (!lastAssistant?.parts) return null;
     const textParts = lastAssistant.parts.filter((p: any) => p.type === "text" && p.text).map((p: any) => p.text);
-    if (textParts.length === 0)
-      return null;
+    if (textParts.length === 0) return null;
     return textParts.join("");
   } catch (err) {
     logInfo(`[subagent-sync] Error reading child messages: ${err}`);
@@ -2591,7 +2694,7 @@ function loadPluginConfig(directory: string): FallbackConfigOverrides {
     join(directory, ".opencode", "opencode-fallback.json"),
     join(directory, ".opencode", "opencode-fallback.jsonc"),
     join(process.env.HOME || "", ".config", "opencode", "opencode-fallback.json"),
-    join(process.env.HOME || "", ".config", "opencode", "opencode-fallback.jsonc")
+    join(process.env.HOME || "", ".config", "opencode", "opencode-fallback.jsonc"),
   ];
   for (const configPath of configPaths) {
     if (existsSync(configPath)) {
@@ -2607,20 +2710,31 @@ function loadPluginConfig(directory: string): FallbackConfigOverrides {
 }
 async function OpenCodeFallbackPlugin(ctx: PluginInput, configOverrides?: FallbackConfigOverrides): Promise<Hooks> {
   let agentConfigs: AgentConfigs | undefined;
-  let fileConfig = loadPluginConfig(ctx.directory);
+  const fileConfig = loadPluginConfig(ctx.directory);
   let mergedConfig: FallbackConfig | undefined;
   const globalFallbackModels = normalizeFallbackModelsField(fileConfig.fallback_models);
   const getConfig = (): FallbackConfig => {
     mergedConfig ??= {
       enabled: configOverrides?.enabled ?? fileConfig?.enabled ?? DEFAULT_CONFIG.enabled,
-      retry_on_errors: configOverrides?.retry_on_errors ?? fileConfig?.retry_on_errors ?? DEFAULT_CONFIG.retry_on_errors,
-      retryable_error_patterns: configOverrides?.retryable_error_patterns ?? fileConfig?.retryable_error_patterns ?? DEFAULT_CONFIG.retryable_error_patterns,
-      max_fallback_attempts: configOverrides?.max_fallback_attempts ?? fileConfig?.max_fallback_attempts ?? DEFAULT_CONFIG.max_fallback_attempts,
-      cooldown_seconds: configOverrides?.cooldown_seconds ?? fileConfig?.cooldown_seconds ?? DEFAULT_CONFIG.cooldown_seconds,
-      timeout_seconds: configOverrides?.timeout_seconds ?? fileConfig?.timeout_seconds ?? DEFAULT_CONFIG.timeout_seconds,
-      notify_on_fallback: configOverrides?.notify_on_fallback ?? fileConfig?.notify_on_fallback ?? DEFAULT_CONFIG.notify_on_fallback,
+      retry_on_errors:
+        configOverrides?.retry_on_errors ?? fileConfig?.retry_on_errors ?? DEFAULT_CONFIG.retry_on_errors,
+      retryable_error_patterns:
+        configOverrides?.retryable_error_patterns ??
+        fileConfig?.retryable_error_patterns ??
+        DEFAULT_CONFIG.retryable_error_patterns,
+      max_fallback_attempts:
+        configOverrides?.max_fallback_attempts ??
+        fileConfig?.max_fallback_attempts ??
+        DEFAULT_CONFIG.max_fallback_attempts,
+      cooldown_seconds:
+        configOverrides?.cooldown_seconds ?? fileConfig?.cooldown_seconds ?? DEFAULT_CONFIG.cooldown_seconds,
+      timeout_seconds:
+        configOverrides?.timeout_seconds ?? fileConfig?.timeout_seconds ?? DEFAULT_CONFIG.timeout_seconds,
+      notify_on_fallback:
+        configOverrides?.notify_on_fallback ?? fileConfig?.notify_on_fallback ?? DEFAULT_CONFIG.notify_on_fallback,
       routing_mode: configOverrides?.routing_mode ?? fileConfig?.routing_mode ?? DEFAULT_CONFIG.routing_mode,
-      fallback_models: configOverrides?.fallback_models ?? fileConfig?.fallback_models ?? DEFAULT_CONFIG.fallback_models
+      fallback_models:
+        configOverrides?.fallback_models ?? fileConfig?.fallback_models ?? DEFAULT_CONFIG.fallback_models,
     };
     return mergedConfig;
   };
@@ -2644,7 +2758,7 @@ async function OpenCodeFallbackPlugin(ctx: PluginInput, configOverrides?: Fallba
     sessionIdleResolvers: new Map(),
     sessionLastMessageTime: new Map(),
     sessionLastMessageModel: new Map(),
-    sessionCompactionInFlight: new Set()
+    sessionCompactionInFlight: new Set(),
   };
   const helpers = createAutoRetryHelpers(deps);
   const { handleEvent: baseEventHandler, handleActivity } = createEventHandler(deps, helpers);
@@ -2666,23 +2780,27 @@ async function OpenCodeFallbackPlugin(ctx: PluginInput, configOverrides?: Fallba
       }
       logInfo(`Plugin initialized with ${agentConfigs ? Object.keys(agentConfigs).length : 0} agents`);
     },
-    event: async ({
-      event
-    }: {
-      event: any;
-    }) => {
+    event: async ({ event }: { event: any }) => {
       if (event.type === "message.updated") {
-        if (!deps.config.enabled)
-          return;
+        if (!deps.config.enabled) return;
         const props = event.properties;
         await messageUpdateHandler(props);
         return;
       }
-      if (event.type === "message.part.delta" || event.type === "session.diff" || event.type === "message.part.updated") {
+      if (
+        event.type === "message.part.delta" ||
+        event.type === "session.diff" ||
+        event.type === "message.part.updated"
+      ) {
         const props = event.properties;
         const info = props?.info;
         const sessionID = props?.sessionID ?? info?.sessionID ?? info?.id;
-        const activityModel = info?.model ?? (typeof info?.providerID === "string" && typeof info?.modelID === "string" ? `${info.providerID}/${info.modelID}` : undefined) ?? props?.model;
+        const activityModel =
+          info?.model ??
+          (typeof info?.providerID === "string" && typeof info?.modelID === "string"
+            ? `${info.providerID}/${info.modelID}`
+            : undefined) ??
+          props?.model;
         if (sessionID) {
           await handleActivity(sessionID, activityModel);
         }
@@ -2697,38 +2815,37 @@ async function OpenCodeFallbackPlugin(ctx: PluginInput, configOverrides?: Fallba
       if (!childSessionID) {
         logInfo("Empty task result but no child session ID found", {
           sessionID: input.sessionID,
-          outputPreview: output.output?.substring(0, 200)
+          outputPreview: output.output?.substring(0, 200),
         });
         return;
       }
       logInfo("Detected empty task result, waiting for child fallback", {
         parentSession: input.sessionID,
-        childSession: childSessionID
+        childSession: childSessionID,
       });
       const maxWaitMs = Math.min((deps.config.timeout_seconds || 120) * 1000, 120000);
       const replacementText = await waitForChildFallbackResult(deps, childSessionID, {
         maxWaitMs,
-        pollIntervalMs: 500
+        pollIntervalMs: 500,
       });
       if (replacementText) {
         output.output = replacementText;
         logInfo("Replaced empty task result with fallback response", {
           parentSession: input.sessionID,
           childSession: childSessionID,
-          responseLength: replacementText.length
+          responseLength: replacementText.length,
         });
       } else {
         logInfo("No fallback response available, preserving original output", {
           parentSession: input.sessionID,
-          childSession: childSessionID
+          childSession: childSessionID,
         });
       }
     },
     "chat.message": async (input: any, output: any) => {
       await chatMessageHandler(input, output);
-    }
+    },
   };
 }
-export {
-  OpenCodeFallbackPlugin as default
-};
+
+export { OpenCodeFallbackPlugin as default };

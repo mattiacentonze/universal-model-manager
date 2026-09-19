@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { setupOpenCodeConfig, findOpenCodeConfigFile, removeUniversalConfig } from "./shared/config-writer.js";
-import { PLUGIN_ID, PLUGIN_ALIASES } from "./shared/constants.js";
-import { getOpenCodeConfigDir } from "./shared/paths.js";
-import { loadConfig, saveConfig, firstMissingStep, completeStep, resetManager, migrateConfig, currentStep } from "./manager/index.js";
-import { runInteractiveMigration, detectLegacyPluginsAndConfigs, formatDiscoveryReport } from "./migration/index.js";
-import { SessionStore } from "./chatgpt-web/session-store.js";
 import { BrowserManager } from "./chatgpt-web/browser-manager.js";
 import { getOrStartBridgeServer } from "./chatgpt-web/index.js";
-import { getChatGptStorageStatePath } from "./shared/paths.js";
+import { SessionStore } from "./chatgpt-web/session-store.js";
+import { completeStep, currentStep, firstMissingStep, loadConfig, resetManager } from "./manager/index.js";
+import { loginActionFor, reorderByManagerIds, setMainByManagerId } from "./manager/provider-accounts.js";
+import { detectLegacyPluginsAndConfigs, formatDiscoveryReport, runInteractiveMigration } from "./migration/index.js";
+import { findOpenCodeConfigFile, removeUniversalConfig, setupOpenCodeConfig } from "./shared/config-writer.js";
+import { PLUGIN_ALIASES, PLUGIN_ID } from "./shared/constants.js";
 import { logger } from "./shared/logger.js";
-import { setMainByManagerId, reorderByManagerIds, loginActionFor } from "./manager/provider-accounts.js";
-import { execFileSync } from "node:child_process";
+import { getChatGptStorageStatePath, getOpenCodeConfigDir } from "./shared/paths.js";
 
 /** This checkout root, inferred from the CLI module location (src/cli.ts or dist/cli.js). */
 function inferLocalRoot(): string {
@@ -25,7 +24,9 @@ function printAccountSummary() {
   const cfg = loadConfig();
   console.log("Accounts:");
   for (const a of cfg.accounts) {
-    console.log(`  - ${a.id} [${a.kind}]${a.main ? " (main)" : ""}: ${a.label} — ${a.configured ? "ready" : "pending"}`);
+    console.log(
+      `  - ${a.id} [${a.kind}]${a.main ? " (main)" : ""}: ${a.label} — ${a.configured ? "ready" : "pending"}`,
+    );
   }
   console.log(`Router orchestrator: ${cfg.router.orchestrator} (${cfg.router.enabled ? "enabled" : "disabled"})`);
   for (const t of ["fast", "medium", "heavy"] as const) {
@@ -68,7 +69,9 @@ Usage:
     const local = localIdx !== -1 && args[localIdx + 1] ? args[localIdx + 1] : inferLocalRoot();
     const res = setupOpenCodeConfig({ backup, localPluginPath: local });
     if (res.modified) {
-      console.log(`[Manager] Updated ${res.path} (local package ${local}) + chatgpt-web provider${backup ? " (backup written)" : ""}.`);
+      console.log(
+        `[Manager] Updated ${res.path} (local package ${local}) + chatgpt-web provider${backup ? " (backup written)" : ""}.`,
+      );
     } else {
       console.log(`[Manager] ${res.path} is already up to date (aliases: ${PLUGIN_ALIASES.join(", ")}).`);
     }
@@ -79,7 +82,9 @@ Usage:
     const backup = args.includes("--backup");
     const res = removeUniversalConfig({ backup, localPluginPath: inferLocalRoot() });
     if (res.modified) {
-      console.log(`[Manager] Removed ${PLUGIN_ID} (+ antigravity) + chatgpt-web provider from ${res.path}${backup ? " (backup written)" : ""}.`);
+      console.log(
+        `[Manager] Removed ${PLUGIN_ID} (+ antigravity) + chatgpt-web provider from ${res.path}${backup ? " (backup written)" : ""}.`,
+      );
     } else {
       console.log(`[Manager] ${res.path} had no managed entries to remove.`);
     }
@@ -103,11 +108,15 @@ Usage:
   if (command === "reset") {
     const proceed = process.env.UNIVERSAL_AUTH_CONFIRM_RESET === "1";
     if (!proceed) {
-      console.error("[Manager] Refusing to reset without confirmation. Set UNIVERSAL_AUTH_CONFIRM_RESET=1 to proceed. Credentials are never touched by reset.");
+      console.error(
+        "[Manager] Refusing to reset without confirmation. Set UNIVERSAL_AUTH_CONFIRM_RESET=1 to proceed. Credentials are never touched by reset.",
+      );
       process.exit(1);
     }
     const cfg = resetManager();
-    console.log(`[Manager] Manager config & wizard reset. Config written to ${getOpenCodeConfigDir()}/universal-auth/manager.json. Credentials untouched.`);
+    console.log(
+      `[Manager] Manager config & wizard reset. Config written to ${getOpenCodeConfigDir()}/universal-auth/manager.json. Credentials untouched.`,
+    );
     void cfg;
     return;
   }
@@ -172,7 +181,7 @@ Usage:
   }
 
   if (command === "router") {
-    const cfg = loadConfig();
+    const _cfg = loadConfig();
     const setIdx = args.indexOf("set");
     if (setIdx !== -1) {
       const tier = args[setIdx + 1];
@@ -185,7 +194,9 @@ Usage:
       const fallback = (args[setIdx + 4] || "").split(",").filter(Boolean);
       const res = completeStep("tiers", { [tier]: { model, variant, fallback } } as any);
       void res;
-      console.log(`[Manager] ${tier} chain set to ${model}${variant ? ` (${variant})` : ""} -> ${fallback.join(", ")}.`);
+      console.log(
+        `[Manager] ${tier} chain set to ${model}${variant ? ` (${variant})` : ""} -> ${fallback.join(", ")}.`,
+      );
       return;
     }
     printAccountSummary();
@@ -244,7 +255,7 @@ Usage:
   process.exit(1);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logger.error("CLI error:", err);
   process.exit(1);
 });

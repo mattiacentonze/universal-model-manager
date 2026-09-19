@@ -1,26 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { GuardStoreLike } from "../src/model-router/guard/enforce.js";
 import {
-  newGuardState,
-  isSelfScript,
-  classify,
-  evaluateGuards,
-  updateState,
-  recordBlock,
-  forcingMessage,
-  trajectoryMetrics,
-  observationOk,
-} from "../src/model-router/guard/guards.js";
-import type { GuardPolicy, GuardCall, GuardState } from "../src/model-router/guard/guards.js";
-import {
-  DEFAULT_GUARD_BUDGET,
+  buildGuardPolicy,
   CUMULATIVE_BUDGET_MULTIPLIER,
   CUMULATIVE_GUARD_BUDGET,
-  buildGuardPolicy,
+  DEFAULT_GUARD_BUDGET,
   formatScorecard,
-  guardBeforeCall,
   guardAfterCall,
+  guardBeforeCall,
 } from "../src/model-router/guard/enforce.js";
-import type { GuardStoreLike } from "../src/model-router/guard/enforce.js";
+import type { GuardCall, GuardPolicy, GuardState } from "../src/model-router/guard/guards.js";
+import {
+  classify,
+  evaluateGuards,
+  forcingMessage,
+  isSelfScript,
+  newGuardState,
+  observationOk,
+  recordBlock,
+  trajectoryMetrics,
+  updateState,
+} from "../src/model-router/guard/guards.js";
 import type { RouterConfig } from "../src/model-router/router/config.js";
 
 describe("model-router/guard/guards.ts", () => {
@@ -422,7 +422,10 @@ describe("model-router/guard/enforce.ts", () => {
     expect(policy.blockSelfScript).toBe(true);
 
     const customCfg: RouterConfig = {
-      activePreset: "default", presets: {}, rules: [], defaultTier: "fast",
+      activePreset: "default",
+      presets: {},
+      rules: [],
+      defaultTier: "fast",
       enforcement: {
         guard: {
           budget: 15,
@@ -454,14 +457,19 @@ describe("model-router/guard/enforce.ts", () => {
     state.ttfa = 2;
 
     const card = formatScorecard(state, "heavy");
-    expect(card).toBe("[router scorecard | tier=heavy | ttfa=2 | read:exec=3:1 | self_scripts=0 | tool_calls=4 | blocks=0 | stop=read_budget]");
+    expect(card).toBe(
+      "[router scorecard | tier=heavy | ttfa=2 | read:exec=3:1 | self_scripts=0 | tool_calls=4 | blocks=0 | stop=read_budget]",
+    );
   });
 
   describe("guardBeforeCall & guardAfterCall", () => {
     it("does nothing when enforcement mode is off", () => {
       const store = createFakeStore();
       const cfg: RouterConfig = {
-        activePreset: "default", presets: {}, rules: [], defaultTier: "fast",
+        activePreset: "default",
+        presets: {},
+        rules: [],
+        defaultTier: "fast",
         enforcement: { mode: "off" },
       };
 
@@ -495,7 +503,10 @@ describe("model-router/guard/enforce.ts", () => {
     it("advisory mode notes violation without blocking", () => {
       const store = createFakeStore();
       const cfg: RouterConfig = {
-        activePreset: "default", presets: {}, rules: [], defaultTier: "fast",
+        activePreset: "default",
+        presets: {},
+        rules: [],
+        defaultTier: "fast",
         enforcement: { mode: "advisory" },
       };
 
@@ -533,7 +544,10 @@ describe("model-router/guard/enforce.ts", () => {
     it("enforced mode blocks forbidden tool calls and counts the attempt", () => {
       const store = createFakeStore();
       const cfg: RouterConfig = {
-        activePreset: "default", presets: {}, rules: [], defaultTier: "fast",
+        activePreset: "default",
+        presets: {},
+        rules: [],
+        defaultTier: "fast",
         enforcement: { mode: "enforced" },
       };
 
@@ -561,7 +575,10 @@ describe("model-router/guard/enforce.ts", () => {
     it("downgrades trivial calls from enforced to advisory if trivialBypass is true", () => {
       const store = createFakeStore();
       const cfg: RouterConfig = {
-        activePreset: "default", presets: {}, rules: [], defaultTier: "fast",
+        activePreset: "default",
+        presets: {},
+        rules: [],
+        defaultTier: "fast",
         enforcement: {
           mode: "enforced",
           proportional: { trivialBypass: true },

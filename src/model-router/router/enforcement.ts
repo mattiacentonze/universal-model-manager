@@ -34,16 +34,8 @@ export function resolveEnforcementMode(args: {
 
   // Config resolution
   const base: EnforcementMode = enf?.mode ?? "advisory";
-  let mode: EnforcementMode;
-
-  if (
-    args.tier !== undefined &&
-    enf?.perTier?.[args.tier] !== undefined
-  ) {
-    mode = enf.perTier[args.tier]!;
-  } else {
-    mode = base;
-  }
+  const perTierMode = args.tier !== undefined ? enf?.perTier?.[args.tier] : undefined;
+  const mode: EnforcementMode = perTierMode ?? base;
 
   if (warning !== undefined) {
     return { mode, warning };

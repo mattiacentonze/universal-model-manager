@@ -1,17 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { EscalatePolicy } from "../src/model-router/escalate/ladder.js";
 import {
-  tierRank,
-  resolveStartTier,
-  newLadderState,
-  recordAttempt,
-  nextTierAfter,
-  buildLadderForcingMessage,
-  nextAction,
   advance,
   buildEscalatePolicy,
+  buildLadderForcingMessage,
   formatLadderScorecard,
+  newLadderState,
+  nextAction,
+  nextTierAfter,
+  recordAttempt,
+  resolveStartTier,
+  tierRank,
 } from "../src/model-router/escalate/ladder.js";
-import type { EscalatePolicy } from "../src/model-router/escalate/ladder.js";
 import type { RouterConfig } from "../src/model-router/router/config.js";
 
 describe("model-router/escalate/ladder.ts", () => {
@@ -210,7 +210,7 @@ describe("model-router/escalate/ladder.ts", () => {
       };
       const card = formatLadderScorecard(state, true, "deterministic");
       expect(card).toBe(
-        "[router delegate scorecard | final_tier=heavy | attempts=3 | escalations=2 | cost=25 | verdict=PASS | method=deterministic]"
+        "[router delegate scorecard | final_tier=heavy | attempts=3 | escalations=2 | cost=25 | verdict=PASS | method=deterministic]",
       );
     });
   });

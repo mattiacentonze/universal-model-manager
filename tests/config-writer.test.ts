@@ -1,16 +1,16 @@
-import { describe, expect, it } from "vitest";
-import {
-  applyUniversalConfigUpdates,
-  applyUniversalConfigRemoval,
-  setupOpenCodeConfig,
-  removeUniversalConfig,
-  backupFile,
-} from "../src/shared/config-writer.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse } from "jsonc-parser";
+import { describe, expect, it } from "vitest";
+import {
+  applyUniversalConfigRemoval,
+  applyUniversalConfigUpdates,
+  backupFile,
+  removeUniversalConfig,
+  setupOpenCodeConfig,
+} from "../src/shared/config-writer.js";
 
 /** Real on-disk checkout with the built entrypoints the installer links against. */
 function fakeCheckout(): string {
@@ -118,7 +118,10 @@ describe("applyUniversalConfigUpdates", () => {
 
   it("writes a flat agent map (no nested object model) only when writeAgentChains is true", () => {
     const root = fakeCheckout();
-    const prev = { OPENCODE_CONFIG_DIR: process.env.OPENCODE_CONFIG_DIR, OPENCODE_UNIVERSAL_AUTH_DIR: process.env.OPENCODE_UNIVERSAL_AUTH_DIR };
+    const prev = {
+      OPENCODE_CONFIG_DIR: process.env.OPENCODE_CONFIG_DIR,
+      OPENCODE_UNIVERSAL_AUTH_DIR: process.env.OPENCODE_UNIVERSAL_AUTH_DIR,
+    };
     process.env.OPENCODE_CONFIG_DIR = fakeConfigDir();
     process.env.OPENCODE_UNIVERSAL_AUTH_DIR = mkdtempSync(join(tmpdir(), "uadata-"));
     try {
@@ -161,7 +164,10 @@ describe("setupOpenCodeConfig (filesystem, isolated config dir)", () => {
   it("preserves unrelated agent/settings keys when writing config and tui", () => {
     const root = fakeCheckout();
     const cfgPath = join(fakeConfigDir(), "opencode.json");
-    writeFileSync(cfgPath, `{\n  "agent": { "coder": { "model": "x/y", "prompt": "keep" } },\n  "experimental": { "keep": true }\n}\n`);
+    writeFileSync(
+      cfgPath,
+      `{\n  "agent": { "coder": { "model": "x/y", "prompt": "keep" } },\n  "experimental": { "keep": true }\n}\n`,
+    );
     setupOpenCodeConfig({ configPath: cfgPath, localPluginPath: root });
     const parsed = parse(readFileSync(cfgPath, "utf8"));
     expect(parsed.agent.coder.model).toBe("x/y");
@@ -239,7 +245,10 @@ describe("removeUniversalConfig / applyUniversalConfigRemoval", () => {
     const cfgPath = join(dir, "opencode.json");
     writeFileSync(cfgPath, `{\n  "plugin": ["${refsFor(root).main}"]\n}\n`);
     const tuiPath = join(dir, "tui.json");
-    writeFileSync(tuiPath, `{ "plugin": ["@cortexkit/opencode-openai-auth/tui", "${tui}", "opencode-universal-model-manager"] }`);
+    writeFileSync(
+      tuiPath,
+      `{ "plugin": ["@cortexkit/opencode-openai-auth/tui", "${tui}", "opencode-universal-model-manager"] }`,
+    );
     const res = removeUniversalConfig({ configPath: cfgPath, tuiConfigPath: tuiPath, localPluginPath: root });
     expect(res.modified).toBe(true);
     const tuiParsed = parse(readFileSync(tuiPath, "utf8"));

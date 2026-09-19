@@ -1,14 +1,14 @@
 import type { Plugin, PluginModule } from "@opencode-ai/plugin";
-import { openaiServerPlugin } from "./openai/index.js";
 import { chatgptWebServerPlugin } from "./chatgpt-web/index.js";
 import { fallbackPlugin } from "./fallback/index.js";
-import { opencodeZenServerPlugin } from "./opencode-zen/index.js";
-import ModelRouterPlugin from "./model-router/index.js";
 import { composeHooks } from "./hooks/compose.js";
 import { managerHooks } from "./manager/hooks.js";
 import { createQuotaPoller } from "./manager/quota-poller.js";
+import ModelRouterPlugin from "./model-router/index.js";
+import { openaiServerPlugin } from "./openai/index.js";
+import { opencodeZenServerPlugin } from "./opencode-zen/index.js";
 
-import { PLUGIN_ID, PLUGIN_ALIASES } from "./shared/constants.js";
+import { PLUGIN_ID } from "./shared/constants.js";
 
 /** The OpenCode server plugin for this package: composes all submodules. */
 export const universalModelManagerPlugin: Plugin = async (input, options) => {
@@ -39,12 +39,12 @@ const plugin: PluginModule & { id: string } = { id: PLUGIN_ID, server: universal
 
 export default plugin;
 
-export { openaiServerPlugin, openaiServerPlugin as openaiAuth } from "./openai/index.js";
 export { antigravityServerPlugin, antigravityServerPlugin as antigravityAuth } from "./antigravity/index.js";
 export { chatgptWebServerPlugin, getOrStartBridgeServer } from "./chatgpt-web/index.js";
 export { fallbackPlugin } from "./fallback/index.js";
-export { opencodeZenServerPlugin, zenUsageTracker } from "./opencode-zen/index.js";
-export { managerRouterHooks } from "./router/index.js";
 export { composeHooks } from "./hooks/compose.js";
 export * from "./manager/index.js";
-export { PLUGIN_ID, PLUGIN_ALIASES, ANTIGRAVITY_ENTRY } from "./shared/constants.js";
+export { openaiServerPlugin, openaiServerPlugin as openaiAuth } from "./openai/index.js";
+export { opencodeZenServerPlugin, zenUsageTracker } from "./opencode-zen/index.js";
+export { managerRouterHooks } from "./router/index.js";
+export { ANTIGRAVITY_ENTRY, PLUGIN_ALIASES, PLUGIN_ID } from "./shared/constants.js";

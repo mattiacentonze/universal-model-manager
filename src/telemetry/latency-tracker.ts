@@ -1,8 +1,8 @@
 import {
-  WindowedRecord,
-  WindowedAccountState,
-  WindowedTrackerOptions,
+  type WindowedAccountState,
+  type WindowedRecord,
   WindowedTracker,
+  type WindowedTrackerOptions,
 } from "./windowed-tracker.js";
 
 export interface LatencyRecord extends WindowedRecord {
@@ -22,11 +22,7 @@ export interface LatencyTrackerOptions extends WindowedTrackerOptions {
   clock?: () => number;
 }
 
-export class LatencyTracker extends WindowedTracker<
-  LatencyRecord,
-  AccountLatencyState,
-  LatencyTrackerOptions
-> {
+export class LatencyTracker extends WindowedTracker<LatencyRecord, AccountLatencyState, LatencyTrackerOptions> {
   private alpha: number;
 
   constructor(options: LatencyTrackerOptions = {}) {
@@ -48,7 +44,7 @@ export class LatencyTracker extends WindowedTracker<
     state: AccountLatencyState,
     record: LatencyRecord,
     isNew: boolean,
-    now: number
+    now: number,
   ): void {
     if (isNew) {
       state.ema = record.durationMs;
@@ -71,6 +67,6 @@ export class LatencyTracker extends WindowedTracker<
   }
 
   public getRankedAccounts(accountIds: Array<string | number>): string[] {
-    return this.rankAccounts(accountIds, a => this.getAverageLatency(a) || Infinity);
+    return this.rankAccounts(accountIds, (a) => this.getAverageLatency(a) || Infinity);
   }
 }

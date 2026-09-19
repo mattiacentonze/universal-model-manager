@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { SessionStore } from "../src/chatgpt-web/session-store.js";
 
 describe("SessionStore", () => {
@@ -41,11 +41,56 @@ describe("SessionStore", () => {
 
     store.save({
       cookies: [
-        { name: "oai-did", value: "x", domain: ".chatgpt.com", path: "/", expires: 9999999999, httpOnly: false, secure: true, sameSite: "Lax" },
-        { name: "__cf_bm", value: "x", domain: ".chatgpt.com", path: "/", expires: 9999999999, httpOnly: true, secure: true, sameSite: "None" },
-        { name: "_cfuvid", value: "x", domain: ".chatgpt.com", path: "/", expires: -1, httpOnly: true, secure: true, sameSite: "None" },
-        { name: "oai-mweb-route-desktop", value: "1", domain: ".chatgpt.com", path: "/", expires: 9999999999, httpOnly: true, secure: true, sameSite: "Lax" },
-        { name: "oai-mweb-origin", value: "1", domain: ".chatgpt.com", path: "/", expires: -1, httpOnly: false, secure: true, sameSite: "Lax" },
+        {
+          name: "oai-did",
+          value: "x",
+          domain: ".chatgpt.com",
+          path: "/",
+          expires: 9999999999,
+          httpOnly: false,
+          secure: true,
+          sameSite: "Lax",
+        },
+        {
+          name: "__cf_bm",
+          value: "x",
+          domain: ".chatgpt.com",
+          path: "/",
+          expires: 9999999999,
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+        },
+        {
+          name: "_cfuvid",
+          value: "x",
+          domain: ".chatgpt.com",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+        },
+        {
+          name: "oai-mweb-route-desktop",
+          value: "1",
+          domain: ".chatgpt.com",
+          path: "/",
+          expires: 9999999999,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+        {
+          name: "oai-mweb-origin",
+          value: "1",
+          domain: ".chatgpt.com",
+          path: "/",
+          expires: -1,
+          httpOnly: false,
+          secure: true,
+          sameSite: "Lax",
+        },
       ],
       origins: [],
     });
@@ -62,7 +107,16 @@ describe("SessionStore", () => {
     // Test with oai-sc cookie
     store.save({
       cookies: [
-        { name: "oai-sc", value: "session-token", domain: ".chatgpt.com", path: "/", expires: Math.floor(Date.now() / 1000) + 3600, httpOnly: false, secure: true, sameSite: "None" },
+        {
+          name: "oai-sc",
+          value: "session-token",
+          domain: ".chatgpt.com",
+          path: "/",
+          expires: Math.floor(Date.now() / 1000) + 3600,
+          httpOnly: false,
+          secure: true,
+          sameSite: "None",
+        },
       ],
       origins: [],
     });

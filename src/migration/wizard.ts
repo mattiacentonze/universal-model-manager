@@ -1,8 +1,8 @@
 import * as readline from "node:readline";
+import { setupOpenCodeConfig } from "../shared/config-writer.js";
+import { cleanOpenCodePlugins, cleanTuiConfig, uninstallLegacyNpmPackages } from "./cleaner.js";
 import { detectLegacyPluginsAndConfigs } from "./detector.js";
 import { executeMigration } from "./importer.js";
-import { cleanOpenCodePlugins, cleanTuiConfig, uninstallLegacyNpmPackages } from "./cleaner.js";
-import { setupOpenCodeConfig } from "../shared/config-writer.js";
 import type { DiscoveryReport, MigrationPlan, MigrationResult } from "./types.js";
 
 export function formatDiscoveryReport(report: DiscoveryReport): string {
@@ -42,14 +42,12 @@ export function formatDiscoveryReport(report: DiscoveryReport): string {
 }
 
 function askQuestion(rl: readline.Interface, query: string): Promise<string> {
-  return new Promise(resolve => rl.question(query, resolve));
+  return new Promise((resolve) => rl.question(query, resolve));
 }
 
-export async function runInteractiveMigration(options: {
-  dryRun?: boolean;
-  autoConfirm?: boolean;
-  uninstallNpm?: boolean;
-} = {}): Promise<MigrationResult> {
+export async function runInteractiveMigration(
+  options: { dryRun?: boolean; autoConfirm?: boolean; uninstallNpm?: boolean } = {},
+): Promise<MigrationResult> {
   const report = detectLegacyPluginsAndConfigs();
   console.log(formatDiscoveryReport(report));
 
@@ -66,10 +64,10 @@ export async function runInteractiveMigration(options: {
   }
 
   const plan: MigrationPlan = {
-    importOpenAi: report.items.some(i => i.id === "cortexkit-openai"),
-    importAntigravity: report.items.some(i => i.id === "cortexkit-antigravity"),
-    importFallback: report.items.some(i => i.id === "runtime-fallback"),
-    importChatGptWeb: report.items.some(i => i.id === "codex-chatgpt-web"),
+    importOpenAi: report.items.some((i) => i.id === "cortexkit-openai"),
+    importAntigravity: report.items.some((i) => i.id === "cortexkit-antigravity"),
+    importFallback: report.items.some((i) => i.id === "runtime-fallback"),
+    importChatGptWeb: report.items.some((i) => i.id === "codex-chatgpt-web"),
     replaceInOpenCodeConfig: true,
     replaceInTuiConfig: true,
     uninstallLegacyNpmPackages: options.uninstallNpm ?? false,
@@ -82,18 +80,40 @@ export async function runInteractiveMigration(options: {
     });
 
     try {
-      const ansImport = (await askQuestion(rl, "1. Import all detected settings, accounts, and session cookies? [Y/n]: ")).trim().toLowerCase();
+      const ansImport = (
+        await askQuestion(rl, "1. Import all detected settings, accounts, and session cookies? [Y/n]: ")
+      )
+        .trim()
+        .toLowerCase();
       if (ansImport === "n" || ansImport === "no") {
         console.log("Migration cancelled by user.");
         rl.close();
-        return { success: true, importedItems: [], configModified: false, tuiModified: false, uninstalledPackages: [], errors: [] };
+        return {
+          success: true,
+          importedItems: [],
+          configModified: false,
+          tuiModified: false,
+          uninstalledPackages: [],
+          errors: [],
+        };
       }
 
-      const ansReplace = (await askQuestion(rl, "2. Replace legacy plugins in opencode.jsonc & tui.json with universal-model-manager? [Y/n]: ")).trim().toLowerCase();
+      const ansReplace = (
+        await askQuestion(
+          rl,
+          "2. Replace legacy plugins in opencode.jsonc & tui.json with universal-model-manager? [Y/n]: ",
+        )
+      )
+        .trim()
+        .toLowerCase();
       plan.replaceInOpenCodeConfig = ansReplace !== "n" && ansReplace !== "no";
       plan.replaceInTuiConfig = plan.replaceInOpenCodeConfig;
 
-      const ansUninstall = (await askQuestion(rl, "3. Also run 'npm uninstall' for legacy packages in ~/.config/opencode? [y/N]: ")).trim().toLowerCase();
+      const ansUninstall = (
+        await askQuestion(rl, "3. Also run 'npm uninstall' for legacy packages in ~/.config/opencode? [y/N]: ")
+      )
+        .trim()
+        .toLowerCase();
       plan.uninstallLegacyNpmPackages = ansUninstall === "y" || ansUninstall === "yes";
     } finally {
       rl.close();
@@ -147,7 +167,9 @@ export async function runInteractiveMigration(options: {
       console.log(`  - ${item}`);
     }
   }
-  console.log("\nUniversal Model Manager is now your single active manager for OpenAI, Antigravity, ChatGPT Web, and Fallback!");
+  console.log(
+    "\nUniversal Model Manager is now your single active manager for OpenAI, Antigravity, ChatGPT Web, and Fallback!",
+  );
 
   return result;
 }

@@ -1,41 +1,40 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import {
-  TIERS,
-  type TierName,
-  type CatalogModel,
-  type FallbackTarget,
-  catalogModels,
-  catalogVariants,
-  chainTargets,
-  formatCleanModelName,
-  missingTiers,
-  nextMissingStep,
-  tierVariantOptions,
-} from "./wizard-core.js";
-import {
-  type NativeAction,
-  getAccounts,
-  getAntigravityAccounts,
-  loginActionFor,
-  setMainByManagerId,
-  routingModeAction,
-} from "../manager/provider-accounts.js";
+import { importFromChromeProfile, listChromeProfiles } from "../chatgpt-web/chrome-importer.js";
 import {
   completeStep,
   loadConfig,
+  type RouterRoutingMode,
   resetManager,
   saveConfig,
   syncUnifiedRouting,
-  type RouterRoutingMode,
-  type UnifiedRoutingMode,
   UNIFIED_ROUTING_MODES,
+  type UnifiedRoutingMode,
 } from "../manager/index.js";
+import {
+  getAccounts,
+  loginActionFor,
+  type NativeAction,
+  routingModeAction,
+  setMainByManagerId,
+} from "../manager/provider-accounts.js";
+import { findPortFile } from "../manager/quota-poller.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { dispatchNative } from "./native.js";
-import { listChromeProfiles, importFromChromeProfile } from "../chatgpt-web/chrome-importer.js";
-import { findPortFile } from "../manager/quota-poller.js";
+import {
+  type CatalogModel,
+  catalogModels,
+  catalogVariants,
+  chainTargets,
+  type FallbackTarget,
+  formatCleanModelName,
+  missingTiers,
+  nextMissingStep,
+  TIERS,
+  type TierName,
+  tierVariantOptions,
+} from "./wizard-core.js";
 
 type Api = TuiPluginApi;
 const configDir = () => getOpenCodeConfigDir();
@@ -51,7 +50,11 @@ function openDialog(api: Api, render: () => any) {
 
 /** Friendly toast on native dispatch result. */
 function toastResult(api: Api, res: { ok: boolean; text: string }) {
-  api.ui.toast({ variant: res.ok ? "success" : "error", title: res.ok ? "Dispatched" : "Not dispatched", message: res.text });
+  api.ui.toast({
+    variant: res.ok ? "success" : "error",
+    title: res.ok ? "Dispatched" : "Not dispatched",
+    message: res.text,
+  });
 }
 
 function errorToast(api: Api, text: string) {
@@ -62,13 +65,14 @@ function closeDialog(api: Api) {
   api.ui.dialog?.clear?.();
 }
 
-async function applyRpcCommandSilently(provider: "antigravity" | "openai", command: string, args: string) {
+async function _applyRpcCommandSilently(provider: "antigravity" | "openai", command: string, args: string) {
   try {
     const portEntry = await findPortFile(provider);
     if (!portEntry) return;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
-    const effectiveCommand = provider === "antigravity" && command === "google-routing" ? "antigravity-routing" : command;
+    const effectiveCommand =
+      provider === "antigravity" && command === "google-routing" ? "antigravity-routing" : command;
     await fetch(`http://127.0.0.1:${portEntry.port}/rpc/apply`, {
       method: "POST",
       headers: {
@@ -82,29 +86,35 @@ async function applyRpcCommandSilently(provider: "antigravity" | "openai", comma
 }
 
 /** OpenAI routing preference via the native /openai-routing command. */
-const openaiRouting = (): NativeAction => ({ ...routingModeAction("main-first"), command: "/openai-routing" });
+const _openaiRouting = (): NativeAction => ({ ...routingModeAction("main-first"), command: "/openai-routing" });
 
 /** Rename a manager account's alias (used in fallback targets and the right column). */
-function renameAccountAlias(api: Api) {
+function _renameAccountAlias(api: Api) {
   const accounts = cfg().accounts;
   openDialog(api, () => (
     <api.ui.DialogSelect
       title="Rename account alias"
       placeholder="Select account"
       options={[
-        ...accounts.map(a => ({
+        ...accounts.map((a) => ({
           title: `${a.alias ?? a.label} (${a.kind})`,
           value: a.id,
           onSelect: () => {
             openDialog(api, () => (
-              <api.ui.DialogPrompt title={`Rename alias for ${a.label}`} placeholder="alias" value={a.alias ?? ""} onCancel={() => renameAccountAlias(api)} onConfirm={alias => {
-                const c = cfg();
-                const acc = c.accounts.find(x => x.id === a.id);
-                if (acc) acc.alias = alias.trim() || undefined;
-                saveConfig(c);
-                api.ui.toast({ variant: "success", title: "Alias renamed", message: RESTART });
-                accountsSettings(api);
-              }} />
+              <api.ui.DialogPrompt
+                title={`Rename alias for ${a.label}`}
+                placeholder="alias"
+                value={a.alias ?? ""}
+                onCancel={() => _renameAccountAlias(api)}
+                onConfirm={(alias) => {
+                  const c = cfg();
+                  const acc = c.accounts.find((x) => x.id === a.id);
+                  if (acc) acc.alias = alias.trim() || undefined;
+                  saveConfig(c);
+                  api.ui.toast({ variant: "success", title: "Alias renamed", message: RESTART });
+                  accountsSettings(api);
+                }}
+              />
             ));
           },
         })),
@@ -142,12 +152,12 @@ function openWizardAfter(api: Api, step?: string) {
 
 function accountsWizard(api: Api) {
   const accounts = getAccounts(configDir());
-  const realReady = accounts.some(a => a.configured);
+  const realReady = accounts.some((a) => a.configured);
   const authOpts = (provider: "openai" | "antigravity") => ({
     title: `Login to ${provider === "openai" ? "OpenAI / ChatGPT" : "Google Antigravity"} (native)`,
     value: `login-${provider}`,
     onSelect: () => {
-      dispatchNative(api, loginActionFor(provider)).then(res => toastResult(api, res));
+      dispatchNative(api, loginActionFor(provider)).then((res) => toastResult(api, res));
       accountsWizard(api);
     },
   });
@@ -160,19 +170,28 @@ function accountsWizard(api: Api) {
       title="Provider accounts"
       placeholder="Select"
       options={[
-        { title: accounts.length ? `Found ${accounts.length} real account(s)` : "No real accounts found yet", value: "status", description: realReady ? "At least one provider has real credentials — you can continue." : "Login a provider or skip auth for an external provider (e.g. IIT)." },
+        {
+          title: accounts.length ? `Found ${accounts.length} real account(s)` : "No real accounts found yet",
+          value: "status",
+          description: realReady
+            ? "At least one provider has real credentials — you can continue."
+            : "Login a provider or skip auth for an external provider (e.g. IIT).",
+        },
         authOpts("openai"),
         authOpts("antigravity"),
         {
           title: realReady ? "Continue to model tiers" : "Continue anyway (login later)",
           value: "continue",
-          description: realReady ? "At least one real provider is authenticated." : "Proceed now; you can log in later from the settings.",
+          description: realReady
+            ? "At least one real provider is authenticated."
+            : "Proceed now; you can log in later from the settings.",
           onSelect: () => confirmAccounts(false),
         },
         {
           title: "Skip native auth (use external provider, e.g. IIT)",
           value: "skip-auth",
-          description: "Explicitly skip logging into OpenAI/Antigravity here; you authenticate an external provider externally.",
+          description:
+            "Explicitly skip logging into OpenAI/Antigravity here; you authenticate an external provider externally.",
           onSelect: () => confirmAccounts(true),
         },
         { title: "Close", value: "close", onSelect: () => api.ui.dialog.clear() },
@@ -224,11 +243,7 @@ export const UNIFIED_ROUTING_OPTIONS: Array<{
   },
 ];
 
-export function promptRoutingScope(
-  api: Api,
-  title: string,
-  onSelectScope: (scope: "session" | "all") => void
-) {
+export function promptRoutingScope(api: Api, title: string, onSelectScope: (scope: "session" | "all") => void) {
   openDialog(api, () => (
     <api.ui.DialogSelect
       title={`${title} - Choose scope`}
@@ -238,13 +253,19 @@ export function promptRoutingScope(
           title: "Apply to all sessions (save to config)",
           value: "all",
           description: "Persists to configuration. A restart may be required for background sessions.",
-          onSelect: () => { closeDialog(api); onSelectScope("all"); },
+          onSelect: () => {
+            closeDialog(api);
+            onSelectScope("all");
+          },
         },
         {
           title: "Apply to current session only",
           value: "session",
           description: "Active immediately for the current conversation without modifying persistent config.",
-          onSelect: () => { closeDialog(api); onSelectScope("session"); },
+          onSelect: () => {
+            closeDialog(api);
+            onSelectScope("session");
+          },
         },
       ]}
     />
@@ -254,7 +275,7 @@ export function promptRoutingScope(
 export function openRoutingSelector(
   api: Api,
   target: "manager" | "openai" | "google" | "opencode",
-  onDone?: () => void
+  onDone?: () => void,
 ) {
   const titleMap = {
     manager: "Model Manager routing mode",
@@ -269,7 +290,7 @@ export function openRoutingSelector(
       title={title}
       placeholder="Select routing mode"
       options={[
-        ...UNIFIED_ROUTING_OPTIONS.map(opt => ({
+        ...UNIFIED_ROUTING_OPTIONS.map((opt) => ({
           title: opt.title,
           value: opt.value,
           description: opt.description,
@@ -280,7 +301,14 @@ export function openRoutingSelector(
             });
           },
         })),
-        { title: "< Back", value: "__back", onSelect: () => { if (onDone) onDone(); else closeDialog(api); } },
+        {
+          title: "< Back",
+          value: "__back",
+          onSelect: () => {
+            if (onDone) onDone();
+            else closeDialog(api);
+          },
+        },
       ]}
     />
   ));
@@ -299,7 +327,7 @@ export function getOpenAIRoutingMode(): string {
   return "main-first";
 }
 
-export function setOpenAIRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
+export function setOpenAIRoutingMode(api: Api, mode: UnifiedRoutingMode, _scope: "session" | "all" = "all") {
   void syncUnifiedRouting(api, mode);
 }
 
@@ -329,19 +357,25 @@ export function getGoogleRoutingMode(dir = configDir()): UnifiedRoutingMode {
   return "main-first";
 }
 
-export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
+export function setGoogleRoutingMode(api: Api, mode: UnifiedRoutingMode, _scope: "session" | "all" = "all") {
   void syncUnifiedRouting(api, mode);
 }
 
-export function setOpenCodeZenRoutingMode(api: Api, mode: UnifiedRoutingMode, scope: "session" | "all" = "all") {
+export function setOpenCodeZenRoutingMode(api: Api, mode: UnifiedRoutingMode, _scope: "session" | "all" = "all") {
   void syncUnifiedRouting(api, mode);
 }
 
-export function setRouterRoutingMode(api: Api, mode: RouterRoutingMode | UnifiedRoutingMode, scope: "session" | "all" = "all") {
+export function setRouterRoutingMode(
+  api: Api,
+  mode: RouterRoutingMode | UnifiedRoutingMode,
+  _scope: "session" | "all" = "all",
+) {
   const unified: UnifiedRoutingMode = (
-    mode === "sticky" ? "main-first" :
-    mode === "balanced" || mode === "sticky-balanced" || mode === "round-robin" ? "load-balancing" :
-    mode
+    mode === "sticky"
+      ? "main-first"
+      : mode === "balanced" || mode === "sticky-balanced" || mode === "round-robin"
+        ? "load-balancing"
+        : mode
   ) as UnifiedRoutingMode;
   void syncUnifiedRouting(api, unified);
 }
@@ -355,9 +389,9 @@ export function accountsSettings(api: Api) {
   const accounts = cfg().accounts;
   const refresh = () => accountsSettings(api);
 
-  const googleAccounts = accounts.filter(a => a.kind === "antigravity");
-  const openaiAccounts = accounts.filter(a => a.kind === "openai");
-  const webAccounts = accounts.filter(a => a.kind === "chatgpt-web");
+  const googleAccounts = accounts.filter((a) => a.kind === "antigravity");
+  const openaiAccounts = accounts.filter((a) => a.kind === "openai");
+  const webAccounts = accounts.filter((a) => a.kind === "chatgpt-web");
 
   const openAccountActions = (a: (typeof accounts)[0]) => {
     const providerName = a.kind === "antigravity" ? "Google" : a.kind === "openai" ? "OpenAI" : "ChatGPT Web";
@@ -367,21 +401,29 @@ export function accountsSettings(api: Api) {
         placeholder="Select action"
         options={[
           ...(!a.main
-            ? [{
-                title: "Set as main account",
-                value: `main-${a.id}`,
-                description: `Designate ${a.label} as the primary active account for ${providerName}`,
-                onSelect: async () => {
-                  await setMainByManagerId(configDir(), a.id);
-                  api.ui.toast({ variant: "success", title: "Main account updated", message: `${a.label} is now main.` });
-                  refresh();
+            ? [
+                {
+                  title: "Set as main account",
+                  value: `main-${a.id}`,
+                  description: `Designate ${a.label} as the primary active account for ${providerName}`,
+                  onSelect: async () => {
+                    await setMainByManagerId(configDir(), a.id);
+                    api.ui.toast({
+                      variant: "success",
+                      title: "Main account updated",
+                      message: `${a.label} is now main.`,
+                    });
+                    refresh();
+                  },
                 },
-              }]
-            : [{
-                title: "Active main account (already set)",
-                value: "is-main",
-                description: "This is currently the active main account for this provider.",
-              }]),
+              ]
+            : [
+                {
+                  title: "Active main account (already set)",
+                  value: "is-main",
+                  description: "This is currently the active main account for this provider.",
+                },
+              ]),
           {
             title: `Rename alias (current: ${a.alias || "none"})`,
             value: "rename-alias",
@@ -393,9 +435,9 @@ export function accountsSettings(api: Api) {
                   placeholder="alias (e.g. work, personal)"
                   value={a.alias ?? ""}
                   onCancel={refresh}
-                  onConfirm={alias => {
+                  onConfirm={(alias) => {
                     const c = cfg();
-                    const acc = c.accounts.find(x => x.id === a.id);
+                    const acc = c.accounts.find((x) => x.id === a.id);
                     if (acc) acc.alias = alias.trim() || undefined;
                     saveConfig(c);
                     api.ui.toast({ variant: "success", title: "Alias updated", message: RESTART });
@@ -406,19 +448,21 @@ export function accountsSettings(api: Api) {
             },
           },
           ...(a.alias
-            ? [{
-                title: "Remove alias",
-                value: "remove-alias",
-                description: "Clear the custom alias for this account",
-                onSelect: () => {
-                  const c = cfg();
-                  const acc = c.accounts.find(x => x.id === a.id);
-                  if (acc) acc.alias = undefined;
-                  saveConfig(c);
-                  api.ui.toast({ variant: "success", title: "Alias removed", message: RESTART });
-                  refresh();
+            ? [
+                {
+                  title: "Remove alias",
+                  value: "remove-alias",
+                  description: "Clear the custom alias for this account",
+                  onSelect: () => {
+                    const c = cfg();
+                    const acc = c.accounts.find((x) => x.id === a.id);
+                    if (acc) acc.alias = undefined;
+                    saveConfig(c);
+                    api.ui.toast({ variant: "success", title: "Alias removed", message: RESTART });
+                    refresh();
+                  },
                 },
-              }]
+              ]
             : []),
           {
             title: "< Back",
@@ -446,7 +490,7 @@ export function accountsSettings(api: Api) {
     value: "login-google",
     description: "Authenticate a new Google account via OAuth",
     onSelect: () => {
-      dispatchNative(api, loginActionFor("antigravity")).then(res => {
+      dispatchNative(api, loginActionFor("antigravity")).then((res) => {
         toastResult(api, res);
         refresh();
       });
@@ -483,7 +527,7 @@ export function accountsSettings(api: Api) {
     value: "login-openai",
     description: "Authenticate a new OpenAI/ChatGPT account via OAuth",
     onSelect: () => {
-      dispatchNative(api, loginActionFor("openai")).then(res => {
+      dispatchNative(api, loginActionFor("openai")).then((res) => {
         toastResult(api, res);
         refresh();
       });
@@ -518,14 +562,18 @@ export function accountsSettings(api: Api) {
             title="Select Chrome Profile for ChatGPT Web"
             placeholder="Choose profile"
             options={[
-              ...chromeProfiles.map(p => ({
+              ...chromeProfiles.map((p) => ({
                 title: `${p.name} (${p.email || p.folder})`,
                 value: p.folder,
                 description: p.hasSession ? "Active ChatGPT session found" : "No active session in this profile",
                 onSelect: () => {
                   const res = importFromChromeProfile(p.folder);
                   if (res.ok) {
-                    api.ui.toast({ variant: "success", title: "ChatGPT Web", message: `Connected to ${p.name} (${p.email || p.folder})` });
+                    api.ui.toast({
+                      variant: "success",
+                      title: "ChatGPT Web",
+                      message: `Connected to ${p.name} (${p.email || p.folder})`,
+                    });
                   } else {
                     api.ui.toast({ variant: "error", title: "ChatGPT Web", message: res.error || "Import failed" });
                   }
@@ -537,7 +585,7 @@ export function accountsSettings(api: Api) {
           />
         ));
       } else {
-        dispatchNative(api, loginActionFor("chatgpt-web")).then(res => {
+        dispatchNative(api, loginActionFor("chatgpt-web")).then((res) => {
           toastResult(api, res);
           refresh();
         });
@@ -546,7 +594,7 @@ export function accountsSettings(api: Api) {
   });
 
   // 4. OpenCode Zen accounts
-  const zenAccounts = accounts.filter(a => a.kind === "opencode");
+  const zenAccounts = accounts.filter((a) => a.kind === "opencode");
   for (const a of zenAccounts) {
     options.push({
       title: `OpenCode Zen: ${a.alias ? `[${a.alias}] ` : ""}${a.label}`,
@@ -598,27 +646,30 @@ function persistChain(api: Api, tier: TierName, patch: Record<string, unknown>) 
 /** Provider → model → variant → fallback picker using the real catalog when available. */
 function pickModel(api: Api, tier: TierName) {
   const models = catalogModels(api);
-  const providers = [...new Set(models.map(m => m.provider))];
+  const providers = [...new Set(models.map((m) => m.provider))];
   openDialog(api, () => (
     <api.ui.DialogSelect
       title={`${tier}: choose provider`}
       placeholder="Select provider"
       options={[
-        ...providers.map(p => ({
+        ...providers.map((p) => ({
           title: p,
           value: p,
           onSelect: () => {
-            const of = models.filter(m => m.provider === p);
+            const of = models.filter((m) => m.provider === p);
             openDialog(api, () => (
               <api.ui.DialogSelect
                 title={`${tier}: choose model (${p})`}
                 placeholder="Select model"
                 options={[
-                  ...of.map(m => ({
+                  ...of.map((m) => ({
                     title: m.label,
                     value: m.id,
                     description: m.variant ? `variant: ${m.variant}` : undefined,
-                    onSelect: () => { persistChain(api, tier, { model: m.id }); pickVariant(api, tier, m); },
+                    onSelect: () => {
+                      persistChain(api, tier, { model: m.id });
+                      pickVariant(api, tier, m);
+                    },
                   })),
                   { title: "Custom model id (manual)", value: "__custom", onSelect: () => promptModelId(api, tier, p) },
                   { title: "Back", value: "__back", onSelect: () => pickModel(api, tier) },
@@ -642,9 +693,13 @@ function promptModelId(api: Api, tier: TierName, provider: string) {
       placeholder="provider/model"
       value={provider ? `${provider}/` : ""}
       onCancel={() => pickModel(api, tier)}
-      onConfirm={id => {
+      onConfirm={(id) => {
         const err = modelError(id);
-        if (err) { errorToast(api, err); promptModelId(api, tier, provider); return; }
+        if (err) {
+          errorToast(api, err);
+          promptModelId(api, tier, provider);
+          return;
+        }
         const full = id.includes("/") ? id : provider ? `${provider}/${id}` : id;
         const m: CatalogModel = { provider: provider || full.split("/")[0], id: full, label: full };
         persistChain(api, tier, { model: full });
@@ -663,10 +718,13 @@ function pickVariant(api: Api, tier: TierName, m: CatalogModel) {
       title={`${tier}: variant for ${m.label}`}
       placeholder="Select variant"
       options={[
-        ...variants.map(v => ({
+        ...variants.map((v) => ({
           title: v.value ?? "Default (no variant)",
           value: v.value ?? "",
-          onSelect: () => { persistChain(api, tier, { model: m.id, variant: v.value }); fallbackEditor(api, tier, m.id, v.value); },
+          onSelect: () => {
+            persistChain(api, tier, { model: m.id, variant: v.value });
+            fallbackEditor(api, tier, m.id, v.value);
+          },
         })),
         { title: "Cancel", value: "__cancel", onSelect: () => showTier(api, tier) },
       ]}
@@ -679,8 +737,12 @@ function fallbackEditor(api: Api, tier: TierName, model: string, variant: string
   openDialog(api, () => fallbackOptions(api, tier, model, variant));
 }
 
-function renderTargets(api: Api, tier: TierName): FallbackTarget[] {
-  try { return chainTargets(cfg().router.tiers[tier]); } catch { return []; }
+function renderTargets(_api: Api, tier: TierName): FallbackTarget[] {
+  try {
+    return chainTargets(cfg().router.tiers[tier]);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -703,7 +765,7 @@ export function formatTargetRaw(item: { model: string; alias?: string; variant?:
  */
 export function formatChainString(
   primary: { model: string; alias?: string; variant?: string },
-  fallbacks: Array<{ model: string; alias?: string; variant?: string } | string>
+  fallbacks: Array<{ model: string; alias?: string; variant?: string } | string>,
 ): string {
   const parts: string[] = [];
   if (primary.model) {
@@ -731,14 +793,26 @@ function makeTarget(alias: string, model: string, variant?: string): FallbackTar
   return t;
 }
 
-function fallbackOptions(api: Api, tier: TierName, model: string, variant: string | undefined, targets?: FallbackTarget[]) {
+function fallbackOptions(
+  api: Api,
+  tier: TierName,
+  model: string,
+  variant: string | undefined,
+  targets?: FallbackTarget[],
+) {
   const list = targets ?? renderTargets(api, tier);
   const commit = (next: FallbackTarget[]) => {
     persistChain(api, tier, { model, variant, targets: next });
     fallbackEditor(api, tier, model, variant);
   };
   const models = catalogModels(api);
-  const aliases = [...new Set(cfg().accounts.map(a => a.alias).filter((x): x is string => !!x))];
+  const aliases = [
+    ...new Set(
+      cfg()
+        .accounts.map((a) => a.alias)
+        .filter((x): x is string => !!x),
+    ),
+  ];
 
   const addFallbackTarget = () => {
     openDialog(api, () => (
@@ -746,7 +820,7 @@ function fallbackOptions(api: Api, tier: TierName, model: string, variant: strin
         title={`${tier.toUpperCase()}: choose fallback model`}
         placeholder="Select model from catalog"
         options={[
-          ...models.map(m => ({
+          ...models.map((m) => ({
             title: m.label,
             value: m.id,
             description: m.id,
@@ -763,7 +837,7 @@ function fallbackOptions(api: Api, tier: TierName, model: string, variant: strin
                         value: "",
                         onSelect: () => pickAliasForModel(m.id, undefined),
                       },
-                      ...variants.map(v => ({
+                      ...variants.map((v) => ({
                         title: v,
                         value: v,
                         onSelect: () => pickAliasForModel(m.id, v),
@@ -790,9 +864,12 @@ function fallbackOptions(api: Api, tier: TierName, model: string, variant: strin
                   title={`${tier.toUpperCase()}: custom model id`}
                   placeholder="provider/model"
                   onCancel={() => fallbackEditor(api, tier, model, variant)}
-                  onConfirm={id => {
+                  onConfirm={(id) => {
                     const err = modelError(id);
-                    if (err) { errorToast(api, err); return; }
+                    if (err) {
+                      errorToast(api, err);
+                      return;
+                    }
                     pickAliasForModel(id.trim(), undefined);
                   }}
                 />
@@ -821,7 +898,7 @@ function fallbackOptions(api: Api, tier: TierName, model: string, variant: strin
             description: "Use default provider account",
             onSelect: () => commit([...list, makeTarget("", modelId, modelVariant)]),
           },
-          ...aliases.map(a => ({
+          ...aliases.map((a) => ({
             title: a,
             value: a,
             onSelect: () => commit([...list, makeTarget(a, modelId, modelVariant)]),
@@ -835,7 +912,7 @@ function fallbackOptions(api: Api, tier: TierName, model: string, variant: strin
                   title={`${tier.toUpperCase()}: custom alias`}
                   placeholder="alias"
                   onCancel={() => fallbackEditor(api, tier, model, variant)}
-                  onConfirm={a => commit([...list, makeTarget(a.trim() || "main", modelId, modelVariant)])}
+                  onConfirm={(a) => commit([...list, makeTarget(a.trim() || "main", modelId, modelVariant)])}
                 />
               ));
             },
@@ -851,25 +928,72 @@ function fallbackOptions(api: Api, tier: TierName, model: string, variant: strin
   };
 
   const opts: { title: string; value: string; onSelect?: () => void; description?: string }[] = [
-    { title: "+ Add fallback", value: "__add", description: "Choose a model to append to chain", onSelect: () => addFallbackTarget() },
+    {
+      title: "+ Add fallback",
+      value: "__add",
+      description: "Choose a model to append to chain",
+      onSelect: () => addFallbackTarget(),
+    },
     ...list.map((t, i) => ({
       title: `Fallback ${i + 1}: ${targetLabel(t)}`,
       value: t.model,
       description: "Select to reorder/remove/rename",
       onSelect: () => {
         const sub: { title: string; value: string; onSelect?: () => void }[] = [
-          ...(i > 0 ? [{ title: "Move up", value: "up", onSelect: () => { const n = [...list]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; commit(n); } }] : []),
-          ...(i < list.length - 1 ? [{ title: "Move down", value: "down", onSelect: () => { const n = [...list]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; commit(n); } }] : []),
-          { title: "Rename alias", value: "rename", onSelect: () => {
-            openDialog(api, () => (
-              <api.ui.DialogPrompt title={`${tier.toUpperCase()}: rename alias for ${t.model}`} placeholder="alias" value={t.alias ?? ""} onCancel={() => fallbackEditor(api, tier, model, variant)} onConfirm={a => { const n = [...list]; n[i] = { ...n[i], alias: a.trim() || undefined }; commit(n); }} />
-            ));
-          } },
+          ...(i > 0
+            ? [
+                {
+                  title: "Move up",
+                  value: "up",
+                  onSelect: () => {
+                    const n = [...list];
+                    [n[i - 1], n[i]] = [n[i], n[i - 1]];
+                    commit(n);
+                  },
+                },
+              ]
+            : []),
+          ...(i < list.length - 1
+            ? [
+                {
+                  title: "Move down",
+                  value: "down",
+                  onSelect: () => {
+                    const n = [...list];
+                    [n[i + 1], n[i]] = [n[i], n[i + 1]];
+                    commit(n);
+                  },
+                },
+              ]
+            : []),
+          {
+            title: "Rename alias",
+            value: "rename",
+            onSelect: () => {
+              openDialog(api, () => (
+                <api.ui.DialogPrompt
+                  title={`${tier.toUpperCase()}: rename alias for ${t.model}`}
+                  placeholder="alias"
+                  value={t.alias ?? ""}
+                  onCancel={() => fallbackEditor(api, tier, model, variant)}
+                  onConfirm={(a) => {
+                    const n = [...list];
+                    n[i] = { ...n[i], alias: a.trim() || undefined };
+                    commit(n);
+                  }}
+                />
+              ));
+            },
+          },
           { title: "Remove", value: "remove", onSelect: () => commit(list.filter((_, j) => j !== i)) },
           { title: "< Back", value: "__back", onSelect: () => fallbackEditor(api, tier, model, variant) },
         ];
         openDialog(api, () => (
-          <api.ui.DialogSelect title={`${tier.toUpperCase()}: ${targetLabel(t)}`} placeholder="Select action" options={sub} />
+          <api.ui.DialogSelect
+            title={`${tier.toUpperCase()}: ${targetLabel(t)}`}
+            placeholder="Select action"
+            options={sub}
+          />
         ));
       },
     })),
@@ -892,10 +1016,35 @@ function showTier(api: Api, tier: TierName) {
       title={`Set up ${tier.toUpperCase()} tier`}
       placeholder="Select"
       options={[
-        { title: `${tier.toUpperCase()} current: ${formatCleanModelName(chain.model) || "unset"}${chain.variant ? ` (${chain.variant})` : ""}`, value: "status" },
+        {
+          title: `${tier.toUpperCase()} current: ${formatCleanModelName(chain.model) || "unset"}${chain.variant ? ` (${chain.variant})` : ""}`,
+          value: "status",
+        },
         { title: "Choose model", value: "model", onSelect: () => pickModel(api, tier) },
-        ...(chain.model ? [{ title: "Edit variant", value: "variant", onSelect: () => pickVariant(api, tier, { provider: chain.model.split("/")[0], id: chain.model, label: formatCleanModelName(chain.model), variant: chain.variant }) }] : []),
-        ...(chain.model ? [{ title: "Edit fallback order", value: "fb", onSelect: () => fallbackEditor(api, tier, chain.model, chain.variant) }] : []),
+        ...(chain.model
+          ? [
+              {
+                title: "Edit variant",
+                value: "variant",
+                onSelect: () =>
+                  pickVariant(api, tier, {
+                    provider: chain.model.split("/")[0],
+                    id: chain.model,
+                    label: formatCleanModelName(chain.model),
+                    variant: chain.variant,
+                  }),
+              },
+            ]
+          : []),
+        ...(chain.model
+          ? [
+              {
+                title: "Edit fallback order",
+                value: "fb",
+                onSelect: () => fallbackEditor(api, tier, chain.model, chain.variant),
+              },
+            ]
+          : []),
         { title: "< Back", value: "back", onSelect: () => routerSettings(api) },
         { title: "Cancel", value: "close", onSelect: () => api.ui.dialog.clear() },
       ]}
@@ -916,15 +1065,51 @@ function tiersWizard(api: Api) {
   };
   openDialog(api, () => (
     <api.ui.DialogSelect
-      title={`Set up ${tier} tier (${missing.includes(tier) ? "needs confirmation" : ">" + missing.length + " remaining"})`}
+      title={`Set up ${tier} tier (${missing.includes(tier) ? "needs confirmation" : `>${missing.length} remaining`})`}
       placeholder="Select"
       options={[
-        { title: `${tier} current: ${formatCleanModelName(chain.model) || "unset"}${chain.variant ? ` (${chain.variant})` : ""}`, value: "status", description: "Defaults are suggestions — confirm each tier to mark it done." },
+        {
+          title: `${tier} current: ${formatCleanModelName(chain.model) || "unset"}${chain.variant ? ` (${chain.variant})` : ""}`,
+          value: "status",
+          description: "Defaults are suggestions — confirm each tier to mark it done.",
+        },
         { title: "Choose model", value: "model", onSelect: () => pickModel(api, tier) },
-        ...(chain.model ? [{ title: "Edit variant", value: "variant", onSelect: () => pickVariant(api, tier, { provider: chain.model.split("/")[0], id: chain.model, label: formatCleanModelName(chain.model), variant: chain.variant }) }] : []),
-        ...(chain.model ? [{ title: "Edit fallback order", value: "fb", onSelect: () => fallbackEditor(api, tier, chain.model, chain.variant) }] : []),
-        ...(chain.model ? [{ title: "Confirm this tier (accept current)", value: "confirm", onSelect: confirmTier }] : []),
-        { title: "Skip to next tier", value: "skip", onSelect: () => { const rest = missing.slice(1); if (rest.length === 0) openWizardAfter(api, missingTiers(cfg()).length === 0 ? "router" : undefined); else showTier(api, rest[0]); } },
+        ...(chain.model
+          ? [
+              {
+                title: "Edit variant",
+                value: "variant",
+                onSelect: () =>
+                  pickVariant(api, tier, {
+                    provider: chain.model.split("/")[0],
+                    id: chain.model,
+                    label: formatCleanModelName(chain.model),
+                    variant: chain.variant,
+                  }),
+              },
+            ]
+          : []),
+        ...(chain.model
+          ? [
+              {
+                title: "Edit fallback order",
+                value: "fb",
+                onSelect: () => fallbackEditor(api, tier, chain.model, chain.variant),
+              },
+            ]
+          : []),
+        ...(chain.model
+          ? [{ title: "Confirm this tier (accept current)", value: "confirm", onSelect: confirmTier }]
+          : []),
+        {
+          title: "Skip to next tier",
+          value: "skip",
+          onSelect: () => {
+            const rest = missing.slice(1);
+            if (rest.length === 0) openWizardAfter(api, missingTiers(cfg()).length === 0 ? "router" : undefined);
+            else showTier(api, rest[0]);
+          },
+        },
         { title: "Cancel", value: "close", onSelect: () => api.ui.dialog.clear() },
       ]}
     />
@@ -937,7 +1122,10 @@ function routerWizard(api: Api) {
   const r = cfg().router;
   const saveOrchestrator = (orchestrator: string, enabled: boolean) => {
     const err = modelError(orchestrator);
-    if (err) { errorToast(api, err); return; }
+    if (err) {
+      errorToast(api, err);
+      return;
+    }
     completeStep("router", { orchestrator, enabled }, undefined, configDir());
     api.ui.toast({ variant: "success", title: "Router saved", message: RESTART });
     openWizardAfter(api);
@@ -951,16 +1139,17 @@ function routerWizard(api: Api) {
         {
           title: r.enabled ? "Disable router" : "Enable router",
           value: "toggle",
-          onSelect: () => openDialog(api, () => (
-            <api.ui.DialogPrompt
-              title="Router orchestrator"
-              description={() => <text>Current: {formatCleanModelName(r.orchestrator)}</text>}
-              placeholder="provider/model"
-              value={r.orchestrator}
-              onCancel={() => routerWizard(api)}
-              onConfirm={orchestrator => saveOrchestrator(orchestrator, !r.enabled)}
-            />
-          )),
+          onSelect: () =>
+            openDialog(api, () => (
+              <api.ui.DialogPrompt
+                title="Router orchestrator"
+                description={() => <text>Current: {formatCleanModelName(r.orchestrator)}</text>}
+                placeholder="provider/model"
+                value={r.orchestrator}
+                onCancel={() => routerWizard(api)}
+                onConfirm={(orchestrator) => saveOrchestrator(orchestrator, !r.enabled)}
+              />
+            )),
         },
         { title: "Complete wizard", value: "complete", onSelect: () => openWizardAfter(api) },
         { title: "Close", value: "close", onSelect: () => api.ui.dialog.clear() },
@@ -975,10 +1164,15 @@ function orchestratorMenu(api: Api) {
   const currentVariant = r.orchestratorVariant;
   const currentFallbacks = r.orchestratorFallbacks ?? [];
 
-  const saveOrch = (patch: { orchestrator?: string; orchestratorVariant?: string; orchestratorFallbacks?: string[] }) => {
+  const saveOrch = (patch: {
+    orchestrator?: string;
+    orchestratorVariant?: string;
+    orchestratorFallbacks?: string[];
+  }) => {
     const nextOrch = patch.orchestrator ?? r.orchestrator;
     const nextVariant = patch.orchestratorVariant !== undefined ? patch.orchestratorVariant : r.orchestratorVariant;
-    const nextFallbacks = patch.orchestratorFallbacks !== undefined ? patch.orchestratorFallbacks : r.orchestratorFallbacks;
+    const nextFallbacks =
+      patch.orchestratorFallbacks !== undefined ? patch.orchestratorFallbacks : r.orchestratorFallbacks;
 
     completeStep(
       "router",
@@ -989,7 +1183,7 @@ function orchestratorMenu(api: Api) {
         orchestratorFallbacks: nextFallbacks,
       },
       undefined,
-      configDir()
+      configDir(),
     );
     api.ui.toast({ variant: "success", title: "Orchestrator updated", message: RESTART });
   };
@@ -1011,15 +1205,18 @@ function orchestratorMenu(api: Api) {
           onSelect: () => pickOrchestratorModel(api, saveOrch),
         },
         ...(catalogVariants(r.orchestrator, catalogModels(api)).length > 0 || currentVariant
-          ? [{
-              title: `Reasoning variant: ${currentVariant || "default"}`,
-              value: "variant",
-              description: "Select reasoning effort / variant",
-              onSelect: () => pickOrchestratorVariant(api, r.orchestrator, currentVariant, (v) => {
-                saveOrch({ orchestratorVariant: v });
-                orchestratorMenu(api);
-              }),
-            }]
+          ? [
+              {
+                title: `Reasoning variant: ${currentVariant || "default"}`,
+                value: "variant",
+                description: "Select reasoning effort / variant",
+                onSelect: () =>
+                  pickOrchestratorVariant(api, r.orchestrator, currentVariant, (v) => {
+                    saveOrch({ orchestratorVariant: v });
+                    orchestratorMenu(api);
+                  }),
+              },
+            ]
           : []),
         {
           title: "Provider account",
@@ -1030,10 +1227,11 @@ function orchestratorMenu(api: Api) {
         {
           title: `Fallback models (${currentFallbacks.length})`,
           value: "fallbacks",
-          description: currentFallbacks.map(f => formatCleanModelName(f)).join(", ") || "None configured",
-          onSelect: () => orchestratorFallbacksEditor(api, currentFallbacks, (fbs) => {
-            saveOrch({ orchestratorFallbacks: fbs });
-          }),
+          description: currentFallbacks.map((f) => formatCleanModelName(f)).join(", ") || "None configured",
+          onSelect: () =>
+            orchestratorFallbacksEditor(api, currentFallbacks, (fbs) => {
+              saveOrch({ orchestratorFallbacks: fbs });
+            }),
         },
         {
           title: "< Back",
@@ -1045,7 +1243,10 @@ function orchestratorMenu(api: Api) {
   ));
 }
 
-function pickOrchestratorModel(api: Api, saveOrch: (p: { orchestrator?: string; orchestratorVariant?: string }) => void) {
+function pickOrchestratorModel(
+  api: Api,
+  saveOrch: (p: { orchestrator?: string; orchestratorVariant?: string }) => void,
+) {
   const models = catalogModels(api);
 
   openDialog(api, () => (
@@ -1053,7 +1254,7 @@ function pickOrchestratorModel(api: Api, saveOrch: (p: { orchestrator?: string; 
       title="Orchestrator: choose model"
       placeholder="Select model"
       options={[
-        ...models.map(m => ({
+        ...models.map((m) => ({
           title: m.label,
           value: m.id,
           description: m.id,
@@ -1079,9 +1280,12 @@ function pickOrchestratorModel(api: Api, saveOrch: (p: { orchestrator?: string; 
                 title="Orchestrator: custom model id"
                 placeholder="provider/model"
                 onCancel={() => orchestratorMenu(api)}
-                onConfirm={id => {
+                onConfirm={(id) => {
                   const err = modelError(id);
-                  if (err) { errorToast(api, err); return; }
+                  if (err) {
+                    errorToast(api, err);
+                    return;
+                  }
                   saveOrch({ orchestrator: id.trim() });
                   orchestratorMenu(api);
                 }}
@@ -1103,7 +1307,7 @@ function pickOrchestratorVariant(
   api: Api,
   modelId: string,
   current: string | undefined,
-  onVariant: (variant: string | undefined) => void
+  onVariant: (variant: string | undefined) => void,
 ) {
   const models = catalogModels(api);
   const variants = tierVariantOptions(modelId, catalogVariants(modelId, models), current);
@@ -1113,7 +1317,7 @@ function pickOrchestratorVariant(
       title={`Variant for ${formatCleanModelName(modelId)}`}
       placeholder="Select reasoning variant"
       options={[
-        ...variants.map(v => ({
+        ...variants.map((v) => ({
           title: v.value ?? "Default (no variant)",
           value: v.value ?? "",
           onSelect: () => onVariant(v.value),
@@ -1131,7 +1335,9 @@ function pickOrchestratorVariant(
 function pickOrchestratorAccount(api: Api, modelId: string) {
   const provider = modelId.split("/")[0] || "";
   const allAccounts = cfg().accounts;
-  const providerAccounts = allAccounts.filter(a => a.kind === provider || (provider === "google" && a.kind === "antigravity"));
+  const providerAccounts = allAccounts.filter(
+    (a) => a.kind === provider || (provider === "google" && a.kind === "antigravity"),
+  );
   const kind = (provider === "google" ? "antigravity" : provider) as "openai" | "antigravity" | "chatgpt-web";
 
   openDialog(api, () => (
@@ -1148,7 +1354,7 @@ function pickOrchestratorAccount(api: Api, modelId: string) {
             orchestratorMenu(api);
           },
         },
-        ...providerAccounts.map(a => ({
+        ...providerAccounts.map((a) => ({
           title: `${a.alias ? `[${a.alias}] ` : ""}${a.label}${a.main ? " (main)" : ""}`,
           value: a.id,
           description: a.configured ? "Configured" : "Needs login",
@@ -1167,7 +1373,7 @@ function pickOrchestratorAccount(api: Api, modelId: string) {
           onSelect: () => {
             const act = loginActionFor(kind);
             if (act) {
-              dispatchNative(api, act).then(res => {
+              dispatchNative(api, act).then((res) => {
                 toastResult(api, res);
                 orchestratorMenu(api);
               });
@@ -1186,11 +1392,7 @@ function pickOrchestratorAccount(api: Api, modelId: string) {
   ));
 }
 
-function orchestratorFallbacksEditor(
-  api: Api,
-  currentFallbacks: string[],
-  onSave: (fallbacks: string[]) => void
-) {
+function orchestratorFallbacksEditor(api: Api, currentFallbacks: string[], onSave: (fallbacks: string[]) => void) {
   const list = [...currentFallbacks];
   const models = catalogModels(api);
 
@@ -1213,7 +1415,7 @@ function orchestratorFallbacksEditor(
                 title="Choose fallback model for orchestrator"
                 placeholder="Select model"
                 options={[
-                  ...models.map(m => ({
+                  ...models.map((m) => ({
                     title: m.label,
                     value: m.id,
                     description: m.id,
@@ -1228,9 +1430,12 @@ function orchestratorFallbacksEditor(
                           title="Custom fallback model id"
                           placeholder="provider/model"
                           onCancel={() => orchestratorFallbacksEditor(api, list, onSave)}
-                          onConfirm={id => {
+                          onConfirm={(id) => {
                             const err = modelError(id);
-                            if (err) { errorToast(api, err); return; }
+                            if (err) {
+                              errorToast(api, err);
+                              return;
+                            }
                             commit([...list, id.trim()]);
                           }}
                         />
@@ -1254,26 +1459,30 @@ function orchestratorFallbacksEditor(
           onSelect: () => {
             const sub: { title: string; value: string; onSelect?: () => void }[] = [
               ...(i > 0
-                ? [{
-                    title: "Move up",
-                    value: "up",
-                    onSelect: () => {
-                      const n = [...list];
-                      [n[i - 1], n[i]] = [n[i], n[i - 1]];
-                      commit(n);
+                ? [
+                    {
+                      title: "Move up",
+                      value: "up",
+                      onSelect: () => {
+                        const n = [...list];
+                        [n[i - 1], n[i]] = [n[i], n[i - 1]];
+                        commit(n);
+                      },
                     },
-                  }]
+                  ]
                 : []),
               ...(i < list.length - 1
-                ? [{
-                    title: "Move down",
-                    value: "down",
-                    onSelect: () => {
-                      const n = [...list];
-                      [n[i + 1], n[i]] = [n[i], n[i + 1]];
-                      commit(n);
+                ? [
+                    {
+                      title: "Move down",
+                      value: "down",
+                      onSelect: () => {
+                        const n = [...list];
+                        [n[i + 1], n[i]] = [n[i], n[i + 1]];
+                        commit(n);
+                      },
                     },
-                  }]
+                  ]
                 : []),
               {
                 title: "Remove",
@@ -1329,7 +1538,7 @@ export function routerSettings(api: Api) {
           value: "orch",
           onSelect: () => orchestratorMenu(api),
         },
-        ...TIERS.map(t => {
+        ...TIERS.map((t) => {
           const chain = r.tiers[t];
           return {
             title: `${t.toUpperCase()}: ${formatChainString({ model: chain.model, variant: chain.variant }, renderTargets(api, t))}`,
@@ -1355,7 +1564,11 @@ export function showReset(api: Api) {
       onConfirm={() => {
         resetManager();
         openDialog(api, () => (
-          <api.ui.DialogAlert title="Reset" message={`Manager config & wizard reset. Credentials untouched. ${RESTART}`} onConfirm={() => api.ui.dialog.clear()} />
+          <api.ui.DialogAlert
+            title="Reset"
+            message={`Manager config & wizard reset. Credentials untouched. ${RESTART}`}
+            onConfirm={() => api.ui.dialog.clear()}
+          />
         ));
       }}
       onCancel={() => api.ui.dialog.clear()}

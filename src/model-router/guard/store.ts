@@ -1,6 +1,6 @@
-import { newGuardState } from "./guards.js";
-import type { GuardState, GuardPolicy } from "./guards.js";
 import { DEFAULT_IDLE_TTL_MS } from "../router/idle-sweep.js";
+import type { GuardPolicy, GuardState } from "./guards.js";
+import { newGuardState } from "./guards.js";
 
 export interface GuardStoreOptions {
   /** Injectable clock (tests). Defaults to Date.now. */

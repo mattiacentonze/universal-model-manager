@@ -13,7 +13,7 @@ export function managerFallbackChain(): string[] {
   const chain: string[] = [];
   for (const k of ["heavy", "medium", "fast"] as const) {
     const t = tiers[k];
-    chain.push(t.model, ...tierTargets(t).map(x => x.model));
+    chain.push(t.model, ...tierTargets(t).map((x) => x.model));
   }
   return dedupeChain(chain);
 }

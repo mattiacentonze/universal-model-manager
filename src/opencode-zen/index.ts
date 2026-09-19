@@ -29,7 +29,7 @@ export const opencodeZenServerPlugin: Plugin = async (_input, _options) => {
         } else if (type === "session.status") {
           const status = props?.status;
           if (status?.type === "retry") {
-            const agent = props?.agent;
+            const _agent = props?.agent;
             if (typeof status.next === "number" && status.next > Date.now()) {
               zenUsageTracker.recordRateLimit(status.next, status.message);
             }
@@ -42,7 +42,7 @@ export const opencodeZenServerPlugin: Plugin = async (_input, _options) => {
   };
 };
 
-export { zenUsageTracker, ZenUsageTracker } from "./usage-tracker.js";
+export { ZenUsageTracker, zenUsageTracker } from "./usage-tracker.js";
 export default {
   id: "universal-opencode-zen",
   server: opencodeZenServerPlugin,

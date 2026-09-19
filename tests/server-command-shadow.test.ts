@@ -21,7 +21,7 @@ describe("server plugin does not shadow TUI-owned slash commands", () => {
 
   it("config.command keeps only the server text commands, none of the UI-owned names", async () => {
     const cfg: { command?: Record<string, unknown> } = {};
-    await hooks.config!(cfg as never);
+    await hooks.config?.(cfg as never);
     const commands = Object.keys(cfg.command!);
     for (const name of UI_OWNED) expect(commands).not.toContain(name);
     for (const name of SERVER_TEXT) expect(commands).toContain(name);
@@ -30,7 +30,7 @@ describe("server plugin does not shadow TUI-owned slash commands", () => {
   it("command.execute.before does not intercept UI-owned names", async () => {
     for (const name of UI_OWNED) {
       const output = { parts: [] as { type: string; text: string }[] };
-      await hooks["command.execute.before"]!({ command: name, arguments: "" } as never, output as never);
+      await hooks["command.execute.before"]?.({ command: name, arguments: "" } as never, output as never);
       expect(output.parts, `${name} must not be shadowed by a server text part`).toHaveLength(0);
     }
   });
@@ -38,7 +38,7 @@ describe("server plugin does not shadow TUI-owned slash commands", () => {
   it("command.execute.before still serves the kept server text commands", async () => {
     for (const name of SERVER_TEXT) {
       const output = { parts: [] as { type: string; text: string }[] };
-      await hooks["command.execute.before"]!({ command: name, arguments: "" } as never, output as never);
+      await hooks["command.execute.before"]?.({ command: name, arguments: "" } as never, output as never);
       expect(output.parts.length, `${name} should produce a status text`).toBeGreaterThan(0);
     }
   });

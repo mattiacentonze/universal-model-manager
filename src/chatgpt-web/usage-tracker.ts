@@ -14,10 +14,7 @@ export class UsageTracker {
   private readonly filePath: string;
   private readonly sessionStore: SessionStore;
 
-  constructor(
-    filePath = join(getUniversalAuthDataDir(), "chatgpt-usage.json"),
-    sessionStore = new SessionStore()
-  ) {
+  constructor(filePath = join(getUniversalAuthDataDir(), "chatgpt-usage.json"), sessionStore = new SessionStore()) {
     this.filePath = filePath;
     this.sessionStore = sessionStore;
   }
@@ -45,7 +42,7 @@ export class UsageTracker {
     const state = this.readState();
     const now = Date.now();
     const windowStart = now - 3 * 60 * 60 * 1000; // 3 hours
-    state.recentTurns = [...state.recentTurns.filter(t => t > windowStart), now];
+    state.recentTurns = [...state.recentTurns.filter((t) => t > windowStart), now];
     this.writeState(state);
   }
 
@@ -74,7 +71,7 @@ export class UsageTracker {
     const state = this.readState();
     const now = Date.now();
     const windowStart = now - 3 * 60 * 60 * 1000;
-    const activeTurns = state.recentTurns.filter(t => t > windowStart);
+    const activeTurns = state.recentTurns.filter((t) => t > windowStart);
 
     let isRateLimited = false;
     let rateLimitResetFormatted: string | null = null;

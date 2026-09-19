@@ -1,4 +1,3 @@
-import type { PluginLogger } from "./logger.js";
 /**
  * Registration-path agent options.
  *
@@ -14,6 +13,7 @@ import type { PluginLogger } from "./logger.js";
  */
 import type { TierConfig } from "./config.js";
 import { EFFORT_LEVELS } from "./config.js";
+import type { PluginLogger } from "./logger.js";
 import { isClaudeModel } from "./protocol.js";
 
 // ---------------------------------------------------------------------------
@@ -26,11 +26,7 @@ import { isClaudeModel } from "./protocol.js";
 // two different mistakes are still two different warnings.
 const warnedAgentOptionsEffort = new Set<string>();
 
-export function warnAgentOptionsEffortOnce(
-  key: string,
-  message: string,
-  logger?: PluginLogger,
-): void {
+export function warnAgentOptionsEffortOnce(key: string, message: string, logger?: PluginLogger): void {
   if (warnedAgentOptionsEffort.has(key)) return;
   warnedAgentOptionsEffort.add(key);
   // Optional so this module keeps working for callers that have no client

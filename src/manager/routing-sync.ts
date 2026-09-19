@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getOpenCodeConfigDir, getUniversalAuthDataDir } from "../shared/paths.js";
-import { loadConfig, saveConfig, defaultParametersForMode } from "./store.js";
-import type { UnifiedRoutingConfig, UnifiedRoutingMode, UnifiedRoutingParameters } from "./types.js";
 import { findPortFile } from "./quota-poller.js";
+import { defaultParametersForMode, loadConfig, saveConfig } from "./store.js";
+import type { UnifiedRoutingConfig, UnifiedRoutingMode, UnifiedRoutingParameters } from "./types.js";
 
 function writeSensitiveJsonAtomic(file: string, data: unknown): void {
   const dir = dirname(file);
@@ -66,8 +66,13 @@ const MODE_STRATEGY_MAP: Record<UnifiedRoutingMode, ModeStrategyMapping> = {
   },
 };
 
-export function mapModeToGoogleStrategy(mode: UnifiedRoutingMode): { account_selection_strategy: string; scheduling_mode: string } {
-  return MODE_STRATEGY_MAP[mode]?.google ?? { account_selection_strategy: "main-first", scheduling_mode: "cache_first" };
+export function mapModeToGoogleStrategy(mode: UnifiedRoutingMode): {
+  account_selection_strategy: string;
+  scheduling_mode: string;
+} {
+  return (
+    MODE_STRATEGY_MAP[mode]?.google ?? { account_selection_strategy: "main-first", scheduling_mode: "cache_first" }
+  );
 }
 
 export function mapModeToOpenAI(mode: UnifiedRoutingMode): string {
@@ -79,7 +84,7 @@ export function mapModeToOpenAI(mode: UnifiedRoutingMode): string {
  */
 export function translateToProvider(
   config: UnifiedRoutingConfig,
-  provider: "google" | "antigravity" | "openai" | "opencode-zen"
+  provider: "google" | "antigravity" | "openai" | "opencode-zen",
 ): Record<string, unknown> {
   const { mode, parameters } = config;
 
@@ -121,7 +126,7 @@ export function translateToProvider(
 export async function applyRpcCommandSilently(
   provider: "antigravity" | "openai",
   command: string,
-  args: string
+  args: string,
 ): Promise<boolean> {
   try {
     const portEntry = await findPortFile(provider);
@@ -149,7 +154,7 @@ export async function applyRpcCommandSilently(
 export async function syncUnifiedRouting(
   api: any,
   mode: UnifiedRoutingMode,
-  customParams?: Partial<UnifiedRoutingParameters>
+  customParams?: Partial<UnifiedRoutingParameters>,
 ): Promise<void> {
   const parameters: UnifiedRoutingParameters = {
     ...defaultParametersForMode(mode),

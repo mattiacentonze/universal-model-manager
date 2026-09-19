@@ -1,6 +1,6 @@
 import type { Config } from "@opencode-ai/plugin";
-import type { ManagerConfig, RouterSettings } from "./types.js";
 import { emptyConfig, saveConfig, tierTargets } from "./store.js";
+import type { ManagerConfig, RouterSettings } from "./types.js";
 
 /**
  * Reset the MANAGER configuration + wizard to defaults ONLY.
@@ -19,7 +19,9 @@ export function resetManager(dir?: string): ManagerConfig {
  * with a flat model string, optional variant and ordered fallback chain.
  */
 export function buildAgentConfig(router: RouterSettings): NonNullable<Config["agent"]> {
-  const defaultFallbacks = [...new Set([router.tiers.heavy.model, ...tierTargets(router.tiers.heavy).map(target => target.model)])].filter(model => model !== router.orchestrator);
+  const defaultFallbacks = [
+    ...new Set([router.tiers.heavy.model, ...tierTargets(router.tiers.heavy).map((target) => target.model)]),
+  ].filter((model) => model !== router.orchestrator);
   const orchestratorFallbacks = router.orchestratorFallbacks?.length ? router.orchestratorFallbacks : defaultFallbacks;
   const agents: NonNullable<Config["agent"]> = {
     build: {
@@ -37,7 +39,7 @@ export function buildAgentConfig(router: RouterSettings): NonNullable<Config["ag
       model: chain.model,
       mode: "subagent",
       description: `${tier} delegation tier (${chain.model})`,
-      fallback_models: tierTargets(chain).map(t => t.model),
+      fallback_models: tierTargets(chain).map((t) => t.model),
       steps: steps[tier],
       ...(chain.variant ? { variant: chain.variant } : {}),
     };

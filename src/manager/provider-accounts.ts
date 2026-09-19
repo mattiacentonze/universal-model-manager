@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
-// @ts-ignore
+import { join } from "node:path";
 import {
   type AccountMetadataV3,
   type AccountStorageV4,
@@ -129,11 +128,17 @@ function readOpenAIState(statePath: string): OpenAIState | null {
 }
 
 const hasStateCreds = (state: OpenAIState | null, id: string | undefined): boolean =>
-  !!id && isObj(state?.accounts?.[id]) &&
-    (typeof state.accounts![id].refresh === "string" && state.accounts![id].refresh.length > 0 ||
-     typeof state.accounts![id].access === "string" && state.accounts![id].access.length > 0);
+  !!id &&
+  isObj(state?.accounts?.[id]) &&
+  ((typeof state.accounts?.[id].refresh === "string" && state.accounts?.[id].refresh.length > 0) ||
+    (typeof state.accounts?.[id].access === "string" && state.accounts?.[id].access.length > 0));
 
-function accountExpired(a: OpenAIConfigAccount, state: OpenAIState | null, id: string | undefined, now: number): boolean {
+function accountExpired(
+  a: OpenAIConfigAccount,
+  state: OpenAIState | null,
+  id: string | undefined,
+  now: number,
+): boolean {
   const stExp = id ? state?.accounts?.[id]?.expires : undefined;
   const exp = typeof stExp === "number" ? stExp : typeof a.expires === "number" ? a.expires : undefined;
   return exp === undefined ? false : exp <= now;
@@ -171,7 +176,7 @@ export function getOpenAIAccounts(configDir = getOpenCodeConfigDir()): ProviderA
     });
   }
   // Separate main row when the primary is not among the configured fallbacks.
-  if (hasMain && mainId !== undefined && !rows.some(r => r.main)) {
+  if (hasMain && mainId !== undefined && !rows.some((r) => r.main)) {
     rows.unshift({
       provider: "openai",
       id: accountIdFor("openai", mainId),
@@ -196,7 +201,14 @@ export function routingModeAction(mode: RoutingMode, provider: "openai" | "antig
   const action = loginActionFor(provider);
   const cmd = provider === "antigravity" ? "/antigravity-routing" : "/openai-routing";
   const name = provider === "antigravity" ? "Google Antigravity" : "OpenAI";
-  return { ...action, kind: "set-routing", command: cmd, arguments: mode, cli: { command: "", args: [] }, text: `Set ${name} routing to ${mode}.` };
+  return {
+    ...action,
+    kind: "set-routing",
+    command: cmd,
+    arguments: mode,
+    cli: { command: "", args: [] },
+    text: `Set ${name} routing to ${mode}.`,
+  };
 }
 
 /* ----------------------------- Antigravity ------------------------------ */
@@ -265,7 +277,11 @@ function readAntigravity(path: string): AccountStorageV4 | null {
   } catch {
     return null;
   }
-  if (isObj(raw) && (raw as { version?: unknown }).version === 4 && Array.isArray((raw as { accounts?: unknown }).accounts)) {
+  if (
+    isObj(raw) &&
+    (raw as { version?: unknown }).version === 4 &&
+    Array.isArray((raw as { accounts?: unknown }).accounts)
+  ) {
     return raw as unknown as AccountStorageV4;
   }
   return null;
@@ -276,8 +292,8 @@ export async function setAntigravityMain(configDir: string, managerId: string): 
   const path = join(configDir, ANTIGRAVITY_ACCOUNT_FILE);
   let target: number | undefined;
   try {
-    await mutateAccountStorage(path, current => {
-      const idx = current.accounts.findIndex(m => accountIdFor("antigravity", antiKey(m)) === managerId);
+    await mutateAccountStorage(path, (current) => {
+      const idx = current.accounts.findIndex((m) => accountIdFor("antigravity", antiKey(m)) === managerId);
       if (idx === -1) return undefined;
       target = idx;
       current.activeIndex = idx;
@@ -300,9 +316,9 @@ export async function reorderAntigravityAccounts(configDir: string, orderedIds: 
   const path = join(configDir, ANTIGRAVITY_ACCOUNT_FILE);
   let applied = false;
   try {
-    await mutateAccountStorage(path, current => {
+    await mutateAccountStorage(path, (current) => {
       const idOf = (m: AccountMetadataV3) => accountIdFor("antigravity", antiKey(m));
-      const byId = new Map(current.accounts.map(m => [idOf(m), m]));
+      const byId = new Map(current.accounts.map((m) => [idOf(m), m]));
       if (!isPermutation(orderedIds, [...byId.keys()])) return undefined;
       const prevMainIndex = current.activeIndex;
       const prevMainId = current.accounts[prevMainIndex] ? idOf(current.accounts[prevMainIndex]) : undefined;
@@ -313,15 +329,21 @@ export async function reorderAntigravityAccounts(configDir: string, orderedIds: 
           }
         : undefined;
       const prevFamilyIds = {
-        claude: prevFamily?.claude !== undefined && current.accounts[prevFamily.claude] ? idOf(current.accounts[prevFamily.claude]) : undefined,
-        gemini: prevFamily?.gemini !== undefined && current.accounts[prevFamily.gemini] ? idOf(current.accounts[prevFamily.gemini]) : undefined,
+        claude:
+          prevFamily?.claude !== undefined && current.accounts[prevFamily.claude]
+            ? idOf(current.accounts[prevFamily.claude])
+            : undefined,
+        gemini:
+          prevFamily?.gemini !== undefined && current.accounts[prevFamily.gemini]
+            ? idOf(current.accounts[prevFamily.gemini])
+            : undefined,
       };
-      current.accounts = orderedIds.map(id => byId.get(id) as AccountMetadataV3);
-      current.activeIndex = prevMainId !== undefined ? current.accounts.findIndex(m => idOf(m) === prevMainId) : 0;
+      current.accounts = orderedIds.map((id) => byId.get(id) as AccountMetadataV3);
+      current.activeIndex = prevMainId !== undefined ? current.accounts.findIndex((m) => idOf(m) === prevMainId) : 0;
       if (prevFamily) {
         const fam = (field: "claude" | "gemini") => {
           const id = prevFamilyIds[field];
-          const idx = id !== undefined ? current.accounts.findIndex(m => idOf(m) === id) : -1;
+          const idx = id !== undefined ? current.accounts.findIndex((m) => idOf(m) === id) : -1;
           return idx >= 0 ? idx : current.activeIndex;
         };
         current.activeIndexByFamily = { claude: fam("claude"), gemini: fam("gemini") };
@@ -415,9 +437,9 @@ export function getAccounts(configDir = getOpenCodeConfigDir()): ProviderAccount
  * DELEGATED to native login rather than returning a false success.
  */
 export async function setMainByManagerId(configDir: string, managerId: string): Promise<MutationResult> {
-  const anti = getAntigravityAccounts(configDir).find(a => a.id === managerId);
+  const anti = getAntigravityAccounts(configDir).find((a) => a.id === managerId);
   if (anti) return setAntigravityMain(configDir, managerId);
-  const openai = getOpenAIAccounts(configDir).find(a => a.id === managerId);
+  const openai = getOpenAIAccounts(configDir).find((a) => a.id === managerId);
   if (openai) {
     // No supported config-level primary swap; delegate to native login which
     // correctly replaces the OpenCode primary and persists mainAccountId.
@@ -435,16 +457,20 @@ export async function setMainByManagerId(configDir: string, managerId: string): 
 export async function reorderByManagerIds(configDir: string, managerIds: string[]): Promise<MutationResult> {
   const accounts = getAccounts(configDir);
   const providers = new Set(
-    managerIds.map(id => accounts.find(a => a.id === id)?.provider).filter((p): p is AccountProvider => !!p)
+    managerIds.map((id) => accounts.find((a) => a.id === id)?.provider).filter((p): p is AccountProvider => !!p),
   );
-  if (providers.size !== 1) return { kind: "invalid", text: "[Manager] Invalid reorder: ids must name one provider only." };
+  if (providers.size !== 1)
+    return { kind: "invalid", text: "[Manager] Invalid reorder: ids must name one provider only." };
   const provider = [...providers][0];
   // The reorderable roster: for OpenAI the separate main slot is not reorderable,
   // for Antigravity the main is the activeIndex within the single pool.
-  const reorderable = accounts.filter(a => a.provider === provider && (provider === "openai" ? !a.main : true));
-  const allIds = reorderable.map(a => a.id);
+  const reorderable = accounts.filter((a) => a.provider === provider && (provider === "openai" ? !a.main : true));
+  const allIds = reorderable.map((a) => a.id);
   if (!isPermutation(managerIds, allIds)) {
-    return { kind: "invalid", text: "[Manager] Invalid reorder: ids must name every account of the provider once (no duplicates)." };
+    return {
+      kind: "invalid",
+      text: "[Manager] Invalid reorder: ids must name every account of the provider once (no duplicates).",
+    };
   }
   if (provider === "openai") return reorderOpenAIAccounts(configDir, managerIds);
   return reorderAntigravityAccounts(configDir, managerIds);
@@ -456,10 +482,13 @@ export async function reorderByManagerIds(configDir: string, managerIds: string[
  * owned by the plugin. Emits the minimal sequence of adjacent swaps.
  */
 export async function reorderOpenAIAccounts(configDir: string, orderedIds: string[]): Promise<MutationResult> {
-  const accounts = getOpenAIAccounts(configDir).filter(a => !a.main);
-  const current = accounts.map(a => a.id);
+  const accounts = getOpenAIAccounts(configDir).filter((a) => !a.main);
+  const current = accounts.map((a) => a.id);
   if (!isPermutation(orderedIds, current)) {
-    return { kind: "invalid", text: "[Manager] Invalid reorder: ids must name every fallback account once (no duplicates)." };
+    return {
+      kind: "invalid",
+      text: "[Manager] Invalid reorder: ids must name every fallback account once (no duplicates).",
+    };
   }
   const swaps: string[] = [];
   const work = [...current];
@@ -482,7 +511,7 @@ export async function reorderOpenAIAccounts(configDir: string, orderedIds: strin
       kind: "reorder",
       arguments: args,
       cli: { command: "", args: [] }, // no terminal CLI reorder (TUI slash command only)
-      text: swaps.map(s => `/openai-account order ${s}`).join("; "),
+      text: swaps.map((s) => `/openai-account order ${s}`).join("; "),
     },
     text: "OpenAI fallback order is changed through the native plugin. Dispatch the native action(s).",
   };
@@ -492,8 +521,11 @@ export async function reorderOpenAIAccounts(configDir: string, orderedIds: strin
  * Real login actions. `command`/`arguments` are OpenCode native slash-command
  * surface; `cli` is the verified terminal binary argv for exec.
  */
-export function loginActionFor(provider: "openai" | "antigravity" | "chatgpt-web" | "opencode", label?: string): NativeAction {
-  const labelArg = label ? ` --label ${JSON.stringify(label)}` : "";
+export function loginActionFor(
+  provider: "openai" | "antigravity" | "chatgpt-web" | "opencode",
+  label?: string,
+): NativeAction {
+  const _labelArg = label ? ` --label ${JSON.stringify(label)}` : "";
   if (provider === "openai") {
     return {
       provider,

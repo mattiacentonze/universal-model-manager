@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { managerRouterHooks } from "../src/router/index.js";
 import type { RouterSettings } from "../src/manager/types.js";
+import { managerRouterHooks } from "../src/router/index.js";
 
 function makeSettings(): RouterSettings {
   return {
@@ -8,7 +8,12 @@ function makeSettings(): RouterSettings {
     enabled: true,
     tiers: {
       fast: { model: "google/antigravity-gemini-3.8-flash", variant: "medium", fallback: [] },
-      medium: { model: "openai/gpt-6-astra", variant: "high", fallback: ["google/antigravity-gemini-3.8-flash"], targets: [{ model: "google/antigravity-gemini-3.8-flash", variant: "medium" }] },
+      medium: {
+        model: "openai/gpt-6-astra",
+        variant: "high",
+        fallback: ["google/antigravity-gemini-3.8-flash"],
+        targets: [{ model: "google/antigravity-gemini-3.8-flash", variant: "medium" }],
+      },
       heavy: { model: "openai/gpt-6-astra", variant: "low", fallback: [] },
     },
   };
@@ -26,24 +31,44 @@ function chatParams(s: RouterSettings, agent: string, model: F) {
 
 describe("managerRouterHooks variant lookup (chat.params)", () => {
   it("resolves a bare id against the manager's tier chain model", async () => {
-    const model: F = { id: "gpt-6-astra", providerID: "openai", provider: "openai", variants: { high: { reasoningEffort: "high" }, low: { reasoningEffort: "low" } } };
+    const model: F = {
+      id: "gpt-6-astra",
+      providerID: "openai",
+      provider: "openai",
+      variants: { high: { reasoningEffort: "high" }, low: { reasoningEffort: "low" } },
+    };
     expect(await chatParams(makeSettings(), "medium", model)).toEqual({ reasoningEffort: "high" });
   });
 
   it("resolves an actual Gemini fallback id (providerID + bare id) to its fallback variant", async () => {
-    const model: F = { id: "antigravity-gemini-3.8-flash", providerID: "google", provider: "google", variants: { medium: { thinking: true } } };
+    const model: F = {
+      id: "antigravity-gemini-3.8-flash",
+      providerID: "google",
+      provider: "google",
+      variants: { medium: { thinking: true } },
+    };
     expect(await chatParams(makeSettings(), "medium", model)).toEqual({ thinking: true });
   });
 
   it("resolves different variants for the same model across medium vs heavy", async () => {
     const settings = makeSettings();
-    const model: F = { id: "gpt-6-astra", providerID: "openai", provider: "openai", variants: { high: { reasoningEffort: "high" }, low: { reasoningEffort: "low" } } };
+    const model: F = {
+      id: "gpt-6-astra",
+      providerID: "openai",
+      provider: "openai",
+      variants: { high: { reasoningEffort: "high" }, low: { reasoningEffort: "low" } },
+    };
     expect(await chatParams(settings, "medium", model)).toEqual({ reasoningEffort: "high" });
     expect(await chatParams(settings, "heavy", model)).toEqual({ reasoningEffort: "low" });
   });
 
   it("leaves options untouched for an unrelated agent (not a manager tier)", async () => {
-    const model: F = { id: "gpt-6-astra", providerID: "openai", provider: "openai", variants: { high: { reasoningEffort: "high" } } };
+    const model: F = {
+      id: "gpt-6-astra",
+      providerID: "openai",
+      provider: "openai",
+      variants: { high: { reasoningEffort: "high" } },
+    };
     expect(await chatParams(makeSettings(), "build", model)).toEqual({});
   });
 });
@@ -62,7 +87,9 @@ describe("managerRouterHooks explicit task tier tag (tool.execute.before)", () =
   });
 
   it("does not touch non-task tool calls", async () => {
-    const out = await runTool(makeSettings(), "read", { args: { prompt: "[tier:medium] read the file", subagent_type: "general" } });
+    const out = await runTool(makeSettings(), "read", {
+      args: { prompt: "[tier:medium] read the file", subagent_type: "general" },
+    });
     expect(out.args?.subagent_type).toBe("general");
   });
 

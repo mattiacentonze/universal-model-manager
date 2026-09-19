@@ -40,10 +40,7 @@ export interface TrajectoryState {
   dispatches: number;
 }
 
-export function createTrajectory(
-  sessionID: string,
-  tier?: string | null,
-): TrajectoryState {
+export function createTrajectory(sessionID: string, tier?: string | null): TrajectoryState {
   return {
     sessionID,
     tier: tier ?? null,
@@ -68,10 +65,7 @@ export function createTrajectory(
   };
 }
 
-export function recordToolEvent(
-  state: TrajectoryState,
-  event: TrajectoryToolEvent,
-): void {
+export function recordToolEvent(state: TrajectoryState, event: TrajectoryToolEvent): void {
   state.toolCallCount += 1;
 
   if (event.blocked) {
@@ -110,13 +104,8 @@ export function setStopReason(state: TrajectoryState, reason: string): void {
   }
 }
 
-export function trajectoryMetrics(
-  state: TrajectoryState,
-): Record<string, unknown> {
-  const readExecRatio =
-    state.execCount === 0
-      ? state.readCount
-      : state.readCount / state.execCount;
+export function trajectoryMetrics(state: TrajectoryState): Record<string, unknown> {
+  const readExecRatio = state.execCount === 0 ? state.readCount : state.readCount / state.execCount;
 
   return {
     ttfa: state.ttfa,

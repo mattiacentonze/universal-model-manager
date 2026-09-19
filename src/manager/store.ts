@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getOpenCodeConfigDir, getUniversalAuthDataDir } from "../shared/paths.js";
+import { providerConfigured, reconcileConfigured } from "./auth-status.js";
 import type {
   AccountEntry,
   FallbackTarget,
   ManagerConfig,
-  RouterRoutingMode,
   RouterSettings,
   TierChain,
   UnifiedRoutingConfig,
@@ -12,8 +13,6 @@ import type {
   UnifiedRoutingParameters,
   WizardState,
 } from "./types.js";
-import { getUniversalAuthDataDir, getOpenCodeConfigDir } from "../shared/paths.js";
-import { providerConfigured, reconcileConfigured } from "./auth-status.js";
 
 export const MANAGER_FILE = "manager.json";
 export const MANAGER_VERSION = 1;
@@ -64,9 +63,6 @@ export function mapLegacyRoutingMode(legacy?: string): UnifiedRoutingMode {
       return "cost-based";
     case "usage-based":
       return "usage-based";
-    case "sticky":
-    case "fallback-first":
-    case "main-first":
     default:
       return "main-first";
   }
@@ -118,13 +114,20 @@ export const DEFAULT_ROUTER: RouterSettings = {
 
 export const DEFAULT_ACCOUNTS: AccountEntry[] = [
   { id: "openai-main", kind: "openai", label: "OpenAI / ChatGPT", alias: "main", main: true, configured: false },
-  { id: "antigravity-main", kind: "antigravity", label: "Google Antigravity", alias: "main", main: false, configured: false },
+  {
+    id: "antigravity-main",
+    kind: "antigravity",
+    label: "Google Antigravity",
+    alias: "main",
+    main: false,
+    configured: false,
+  },
 ];
 
 export function emptyConfig(): ManagerConfig {
   return {
     version: MANAGER_VERSION,
-    accounts: DEFAULT_ACCOUNTS.map(a => ({ ...a })),
+    accounts: DEFAULT_ACCOUNTS.map((a) => ({ ...a })),
     router: structuredClone(DEFAULT_ROUTER),
     wizard: null,
   };
@@ -145,7 +148,7 @@ function isValidTarget(t: unknown): t is FallbackTarget {
 }
 
 function noDupsAndNoPrimaryCycle(targets: FallbackTarget[], primary: string): boolean {
-  const models = targets.map(t => t.model);
+  const models = targets.map((t) => t.model);
   return models.length === new Set(models).size && !models.includes(primary);
 }
 
@@ -157,21 +160,21 @@ export function isTierChain(v: unknown): v is TierChain {
   if (typeof c.model !== "string") return false;
   if (c.model !== "" && !isValidModelId(c.model)) return false;
   if (c.variant !== undefined && typeof c.variant !== "string") return false;
-  if (!Array.isArray(c.fallback) || !c.fallback.every(f => isValidModelId(f))) return false;
+  if (!Array.isArray(c.fallback) || !c.fallback.every((f) => isValidModelId(f))) return false;
   // The legacy fallback list itself must avoid duplicates and primary cycles.
   if (new Set(c.fallback).size !== c.fallback.length) return false;
   if (c.model !== "" && c.fallback.includes(c.model)) return false;
   if (c.targets !== undefined) {
     if (!Array.isArray(c.targets) || !c.targets.every(isValidTarget)) return false;
     if (!noDupsAndNoPrimaryCycle(c.targets as FallbackTarget[], c.model)) return false;
-    const fromTargets = new Map((c.targets as FallbackTarget[]).map(t => [t.model, t.variant]));
-    if (!c.fallback.every(f => fromTargets.has(f))) return false;
+    const fromTargets = new Map((c.targets as FallbackTarget[]).map((t) => [t.model, t.variant]));
+    if (!c.fallback.every((f) => fromTargets.has(f))) return false;
   }
   if (c.fallbackVariants !== undefined) {
     if (typeof c.fallbackVariants !== "object" || c.fallbackVariants === null) return false;
     const fv = c.fallbackVariants as Record<string, unknown>;
-    if (Object.values(fv).some(v => typeof v !== "string")) return false;
-    if (!Object.keys(fv).every(k => (c.fallback as string[]).includes(k))) return false;
+    if (Object.values(fv).some((v) => typeof v !== "string")) return false;
+    if (!Object.keys(fv).every((k) => (c.fallback as string[]).includes(k))) return false;
   }
   return true;
 }
@@ -184,7 +187,8 @@ function isRoutingConfig(v: unknown): v is UnifiedRoutingConfig {
     if (typeof rc.parameters !== "object" || rc.parameters === null) return false;
     const p = rc.parameters as Record<string, unknown>;
     if (p.softQuotaThresholdPercent !== undefined && typeof p.softQuotaThresholdPercent !== "number") return false;
-    if (p.proactiveRotationThresholdPercent !== undefined && typeof p.proactiveRotationThresholdPercent !== "number") return false;
+    if (p.proactiveRotationThresholdPercent !== undefined && typeof p.proactiveRotationThresholdPercent !== "number")
+      return false;
     if (p.switchOnFirstRateLimit !== undefined && typeof p.switchOnFirstRateLimit !== "boolean") return false;
     if (p.maxAccountSwitches !== undefined && typeof p.maxAccountSwitches !== "number") return false;
     if (p.maxCacheFirstWaitSeconds !== undefined && typeof p.maxCacheFirstWaitSeconds !== "number") return false;
@@ -201,14 +205,30 @@ function isRouter(v: unknown): v is RouterSettings {
   if (typeof r.orchestrator !== "string") return false;
   if (r.orchestrator !== "" && !isValidModelId(r.orchestrator)) return false;
   if (typeof r.enabled !== "boolean") return false;
-  if (r.routingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.routingMode))) return false;
-  if (r.zenRoutingMode !== undefined && !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(String(r.zenRoutingMode))) return false;
+  if (
+    r.routingMode !== undefined &&
+    !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(
+      String(r.routingMode),
+    )
+  )
+    return false;
+  if (
+    r.zenRoutingMode !== undefined &&
+    !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(
+      String(r.zenRoutingMode),
+    )
+  )
+    return false;
   if (r.routing !== undefined && !isRoutingConfig(r.routing)) return false;
   if (r.orchestratorVariant !== undefined && typeof r.orchestratorVariant !== "string") return false;
-  if (r.orchestratorFallbacks !== undefined && (!Array.isArray(r.orchestratorFallbacks) || r.orchestratorFallbacks.some(f => typeof f !== "string"))) return false;
+  if (
+    r.orchestratorFallbacks !== undefined &&
+    (!Array.isArray(r.orchestratorFallbacks) || r.orchestratorFallbacks.some((f) => typeof f !== "string"))
+  )
+    return false;
   const t = r.tiers as Record<string, unknown> | undefined;
   if (typeof t !== "object" || t === null) return false;
-  return TIER_NAMES.every(k => isTierChain(t[k]));
+  return TIER_NAMES.every((k) => isTierChain(t[k]));
 }
 
 function isAccount(v: unknown): v is AccountEntry {
@@ -228,14 +248,14 @@ function isWizard(v: unknown): v is WizardState {
   if (typeof v !== "object" || v === null) return false;
   const w = v as Record<string, unknown>;
   if (typeof w.updatedAt !== "string") return false;
-  if (!Array.isArray(w.completed) || w.completed.some(s => typeof s !== "string")) return false;
+  if (!Array.isArray(w.completed) || w.completed.some((s) => typeof s !== "string")) return false;
   if (w.accountsConfirmed !== undefined && typeof w.accountsConfirmed !== "boolean") return false;
   if (w.accountsSkipAuth !== undefined && typeof w.accountsSkipAuth !== "boolean") return false;
   if (w.routerConfirmed !== undefined && typeof w.routerConfirmed !== "boolean") return false;
   if (w.tiersConfirmed !== undefined) {
     const tc = w.tiersConfirmed as Record<string, unknown>;
     if (typeof tc !== "object" || tc === null) return false;
-    if (Object.values(tc).some(v => typeof v !== "boolean")) return false;
+    if (Object.values(tc).some((v) => typeof v !== "boolean")) return false;
   }
   return true;
 }
@@ -245,13 +265,15 @@ export function validateConfig(input: unknown): ManagerConfig {
   if (typeof input !== "object" || input === null) throw new Error("[Manager] Config is not an object");
   const raw = input as Record<string, unknown>;
   if (raw.version !== undefined && raw.version !== MANAGER_VERSION) {
-    throw new Error(`[Manager] Unknown config version ${String(raw.version)} (expected ${MANAGER_VERSION}). Refusing to overwrite user data.`);
+    throw new Error(
+      `[Manager] Unknown config version ${String(raw.version)} (expected ${MANAGER_VERSION}). Refusing to overwrite user data.`,
+    );
   }
 
-  const accounts = Array.isArray(raw.accounts) ? raw.accounts.filter(isAccount).map(a => ({ ...a })) : [];
+  const accounts = Array.isArray(raw.accounts) ? raw.accounts.filter(isAccount).map((a) => ({ ...a })) : [];
   for (const kind of ["openai", "antigravity", "chatgpt-web", "opencode"] as const) {
-    const ofKind = accounts.filter(a => a.kind === kind);
-    if (ofKind.length > 0 && !ofKind.some(a => a.main)) ofKind[0].main = true;
+    const ofKind = accounts.filter((a) => a.kind === kind);
+    if (ofKind.length > 0 && !ofKind.some((a) => a.main)) ofKind[0].main = true;
   }
 
   // Router and wizard must be structurally valid; refuse to silently drop them.
@@ -346,20 +368,22 @@ export function migrateConfig(dir = getUniversalAuthDataDir()): ManagerConfig {
 
 /** Canonical ordered fallback targets for a tier chain (legacy `fallback`+`fallbackVariants` merge). */
 export function tierTargets(chain: TierChain): FallbackTarget[] {
-  if (chain.targets?.length) return chain.targets.map(t => ({ model: t.model, variant: t.variant, alias: t.alias }));
+  if (chain.targets?.length) return chain.targets.map((t) => ({ model: t.model, variant: t.variant, alias: t.alias }));
   const map = chain.fallbackVariants ?? {};
-  return chain.fallback.map(model => ({ model, variant: map[model] }));
+  return chain.fallback.map((model) => ({ model, variant: map[model] }));
 }
 
 /** Set the canonical ordered fallback targets, keeping legacy fields in sync. */
 export function setTierTargets(chain: TierChain, targets: FallbackTarget[]): TierChain {
-  const fallback = targets.map(t => t.model);
-  const fallbackVariants = Object.fromEntries(targets.filter(t => t.variant).map(t => [t.model, t.variant as string]));
-  return { ...chain, targets: targets.map(t => ({ ...t })), fallback, fallbackVariants };
+  const fallback = targets.map((t) => t.model);
+  const fallbackVariants = Object.fromEntries(
+    targets.filter((t) => t.variant).map((t) => [t.model, t.variant as string]),
+  );
+  return { ...chain, targets: targets.map((t) => ({ ...t })), fallback, fallbackVariants };
 }
 
 function anyProviderConfigured(configDir: string): boolean {
-  return (["openai", "antigravity", "chatgpt-web"] as const).some(k => providerConfigured(k, configDir));
+  return (["openai", "antigravity", "chatgpt-web"] as const).some((k) => providerConfigured(k, configDir));
 }
 
 /** Accounts step: user confirmed AND (any real provider OR explicit external-auth skip). */
@@ -370,7 +394,7 @@ export function accountsStepMissing(cfg: ManagerConfig, configDir = getOpenCodeC
 
 /** Tiers step: any tier not confirmed by the user or with an invalid model. */
 export function tiersStepMissing(cfg: ManagerConfig): boolean {
-  return TIER_NAMES.some(t => !cfg.wizard?.tiersConfirmed?.[t] || !isValidModelId(cfg.router.tiers[t].model));
+  return TIER_NAMES.some((t) => !cfg.wizard?.tiersConfirmed?.[t] || !isValidModelId(cfg.router.tiers[t].model));
 }
 
 /** Router step: orchestrator not confirmed or invalid. */

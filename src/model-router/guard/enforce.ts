@@ -1,15 +1,9 @@
-import {
-  evaluateGuards,
-  updateState,
-  recordBlock,
-  forcingMessage,
-  observationOk,
-} from "./guards.js";
-import type { GuardPolicy, GuardCall, GuardState } from "./guards.js";
-import { scrubText } from "./scrub.js";
-import { resolveEnforcementMode } from "../router/enforcement.js";
-import type { EnforcementMode } from "../router/enforcement.js";
 import type { RouterConfig } from "../router/config.js";
+import type { EnforcementMode } from "../router/enforcement.js";
+import { resolveEnforcementMode } from "../router/enforcement.js";
+import type { GuardCall, GuardPolicy, GuardState } from "./guards.js";
+import { evaluateGuards, forcingMessage, observationOk, recordBlock, updateState } from "./guards.js";
+import { scrubText } from "./scrub.js";
 
 /**
  * Default total tool-call ceiling for an enforced subagent delegation. This is a
@@ -27,8 +21,7 @@ export const DEFAULT_GUARD_BUDGET = 25;
 export const CUMULATIVE_BUDGET_MULTIPLIER = 3;
 
 /** Default-case cumulative budget, retained for imports/tests. */
-export const CUMULATIVE_GUARD_BUDGET =
-  DEFAULT_GUARD_BUDGET * CUMULATIVE_BUDGET_MULTIPLIER;
+export const CUMULATIVE_GUARD_BUDGET = DEFAULT_GUARD_BUDGET * CUMULATIVE_BUDGET_MULTIPLIER;
 
 export interface GuardStoreLike {
   ensure(sessionID: string, policy: GuardPolicy): GuardState;
@@ -40,7 +33,7 @@ export interface GuardStoreLike {
 /** Build a GuardPolicy from config for a given subagent tier. deliverableSignal
  * is null in Wave 1 (Mode A/B signal wiring lands in Wave 2/4), which disables
  * the deliverable-first clause — the honest common case (M5). */
-export function buildGuardPolicy(cfg: RouterConfig, tier: string | null): GuardPolicy {
+export function buildGuardPolicy(cfg: RouterConfig, _tier: string | null): GuardPolicy {
   const g = cfg.enforcement?.guard ?? {};
   const budget = g.budget ?? DEFAULT_GUARD_BUDGET;
   return {
@@ -86,11 +79,7 @@ export function guardBeforeCall(params: {
 }): BeforeResult {
   const { cfg, tier, sessionID, tool, toolArgs, store, env, trivial } = params;
   let mode = resolveEnforcementMode({ config: cfg, tier: tier ?? undefined, env }).mode;
-  if (
-    mode === "enforced" &&
-    trivial === true &&
-    cfg.enforcement?.proportional?.trivialBypass !== false
-  ) {
+  if (mode === "enforced" && trivial === true && cfg.enforcement?.proportional?.trivialBypass !== false) {
     mode = "advisory";
   }
   if (mode === "off") return { block: false, mode };
@@ -113,10 +102,7 @@ export function guardBeforeCall(params: {
   // advisory: never block; record the would-block and stash a banner the
   // after-hook will append to this call's output.
   recordBlock(state, decision);
-  store.setPendingNote(
-    sessionID,
-    scrubText(`[\u26a0 GUARD:${decision.guard}] ${forcingMessage(state, policy)}`),
-  );
+  store.setPendingNote(sessionID, scrubText(`[\u26a0 GUARD:${decision.guard}] ${forcingMessage(state, policy)}`));
   return { block: false, mode, guard: decision.guard };
 }
 

@@ -1,11 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,12 +64,7 @@ export interface ModelGenerationsConfig {
 // documented but never read — the spread happened once at module load from the
 // default array, so a user override could not reach it. Generation is not the
 // criterion; whether goal-oriented prompting suits the model is.
-export const DEFAULT_STRONG_MODEL_PATTERNS = [
-  "claude-fable-5",
-  "claude-mythos-5",
-  "opus-4-8",
-  "claude-opus-5",
-];
+export const DEFAULT_STRONG_MODEL_PATTERNS = ["claude-fable-5", "claude-mythos-5", "opus-4-8", "claude-opus-5"];
 
 export interface TierConfig {
   model: string;
@@ -121,15 +109,35 @@ export interface EnforcementConfig {
   mode?: "off" | "advisory" | "enforced";
   envGate?: string;
   perTier?: Record<string, "off" | "advisory" | "enforced">;
-  guard?: { readDraftCap?: number; sameOpRetryCap?: number; blockSelfScript?: boolean; deliverableFirst?: boolean; budget?: number; blockScriptWrites?: boolean };
-  verify?: { require?: "never" | "whenDoDPresent" | "always"; requireExplicitDoD?: boolean; preferDeterministic?: boolean; graderPolicy?: "atLeastProducerTier"; graderTemperature?: number; minGraderTier?: string | null;
+  guard?: {
+    readDraftCap?: number;
+    sameOpRetryCap?: number;
+    blockSelfScript?: boolean;
+    deliverableFirst?: boolean;
+    budget?: number;
+    blockScriptWrites?: boolean;
+  };
+  verify?: {
+    require?: "never" | "whenDoDPresent" | "always";
+    requireExplicitDoD?: boolean;
+    preferDeterministic?: boolean;
+    graderPolicy?: "atLeastProducerTier";
+    graderTemperature?: number;
+    minGraderTier?: string | null;
     /** Ceiling for one producer `session.prompt` turn, in ms. Default 600000. */
     delegateTimeoutMs?: number;
     /** Ceiling for one grader `session.prompt` turn, in ms. Default 60000. */
     graderTimeoutMs?: number;
     /** Ceiling for the whole acceptance gate, in ms. Default 90000. */
-    gateBudgetMs?: number };
-  escalate?: { floorTier?: string | null; ladder?: string[]; maxAttemptsPerTier?: number; maxTotalAttempts?: number; costCeiling?: { base?: string; multiple?: number } };
+    gateBudgetMs?: number;
+  };
+  escalate?: {
+    floorTier?: string | null;
+    ladder?: string[];
+    maxAttemptsPerTier?: number;
+    maxTotalAttempts?: number;
+    costCeiling?: { base?: string; multiple?: number };
+  };
   proportional?: { trivialBypass?: boolean; trivialClassifier?: string };
 }
 
@@ -307,18 +315,10 @@ export function findProjectOverride(): string | undefined {
 }
 
 export function statePath(): string {
-  return join(
-    homedir(),
-    ".config",
-    "opencode",
-    "opencode-model-router.state.json",
-  );
+  return join(homedir(), ".config", "opencode", "opencode-model-router.state.json");
 }
 
-export function resolvePresetName(
-  cfg: RouterConfig,
-  requestedPreset: string,
-): string | undefined {
+export function resolvePresetName(cfg: RouterConfig, requestedPreset: string): string | undefined {
   if (cfg.presets[requestedPreset]) {
     return requestedPreset;
   }
@@ -328,9 +328,7 @@ export function resolvePresetName(
     return undefined;
   }
 
-  return Object.keys(cfg.presets).find(
-    (name) => name.toLowerCase() === normalized,
-  );
+  return Object.keys(cfg.presets).find((name) => name.toLowerCase() === normalized);
 }
 
 /** True for a non-null, non-array object literal. */
@@ -349,9 +347,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * what makes "it validated at load" mean "it will parse later". catalog.ts
  * re-exports it so the reference is still reachable from where it is used.
  */
-export function parseModelRef(
-  ref: string,
-): { providerId: string; modelId: string } | undefined {
+export function parseModelRef(ref: string): { providerId: string; modelId: string } | undefined {
   const i = ref.indexOf("/");
   if (i <= 0 || i === ref.length - 1) return undefined;
   return { providerId: ref.slice(0, i), modelId: ref.slice(i + 1) };
@@ -368,28 +364,20 @@ function validatePresets(obj: Record<string, unknown>): Record<string, unknown> 
 
   const presets = obj.presets as Record<string, unknown>;
   for (const [presetName, preset] of Object.entries(presets)) {
-    if (
-      typeof preset !== "object" ||
-      preset === null ||
-      Array.isArray(preset)
-    ) {
+    if (typeof preset !== "object" || preset === null || Array.isArray(preset)) {
       throw new Error(`tiers.json: preset '${presetName}' must be an object`);
     }
     const tiers = preset as Record<string, unknown>;
     for (const [tierName, tier] of Object.entries(tiers)) {
       if (typeof tier !== "object" || tier === null) {
-        throw new Error(
-          `tiers.json: tier '${presetName}.${tierName}' must be an object`,
-        );
+        throw new Error(`tiers.json: tier '${presetName}.${tierName}' must be an object`);
       }
       const t = tier as Record<string, unknown>;
       // `model` is the only required tier field — so an overrides file can define
       // a new preset/tier with just `{ "model": "..." }`. The rest are optional
       // and only type-checked when present.
       if (typeof t.model !== "string" || !t.model) {
-        throw new Error(
-          `tiers.json: '${presetName}.${tierName}.model' must be a non-empty string`,
-        );
+        throw new Error(`tiers.json: '${presetName}.${tierName}.model' must be a non-empty string`);
       }
       // Same reasoning as effort and promptStyle below, one step earlier: a ref
       // missing its provider (`claude-sonnet-5`) or missing its model
@@ -399,37 +387,25 @@ function validatePresets(obj: Record<string, unknown>): Record<string, unknown> 
       // is decided here. parseModelRef is the same function the catalog lookup
       // uses, so passing this guarantees the ref parses there too.
       if (!parseModelRef(t.model)) {
-        throw new Error(
-          `tiers.json: '${presetName}.${tierName}.model' must be 'provider/model' (got '${t.model}')`,
-        );
+        throw new Error(`tiers.json: '${presetName}.${tierName}.model' must be 'provider/model' (got '${t.model}')`);
       }
       if (t.description !== undefined && typeof t.description !== "string") {
-        throw new Error(
-          `tiers.json: '${presetName}.${tierName}.description' must be a string`,
-        );
+        throw new Error(`tiers.json: '${presetName}.${tierName}.description' must be a string`);
       }
       if (t.whenToUse !== undefined && !Array.isArray(t.whenToUse)) {
-        throw new Error(
-          `tiers.json: '${presetName}.${tierName}.whenToUse' must be an array`,
-        );
+        throw new Error(`tiers.json: '${presetName}.${tierName}.whenToUse' must be an array`);
       }
       // A typo'd effort would otherwise load clean and be silently dropped at
       // registration time, leaving a tier running at the provider default with
       // only a warning nobody reads.
-      if (
-        t.effort !== undefined &&
-        !EFFORT_LEVELS.some((level) => level === t.effort)
-      ) {
+      if (t.effort !== undefined && !EFFORT_LEVELS.some((level) => level === t.effort)) {
         throw new Error(
           `tiers.json: preset '${presetName}' tier '${tierName}': effort must be one of ${EFFORT_LEVELS.join(", ")}`,
         );
       }
       // Same reasoning as effort: a typo'd style would otherwise load clean and
       // silently fall back to the prescriptive prompt with nothing said.
-      if (
-        t.promptStyle !== undefined &&
-        !PROMPT_STYLES.some((style) => style === t.promptStyle)
-      ) {
+      if (t.promptStyle !== undefined && !PROMPT_STYLES.some((style) => style === t.promptStyle)) {
         throw new Error(
           `tiers.json: preset '${presetName}' tier '${tierName}': promptStyle must be one of ${PROMPT_STYLES.join("|")}`,
         );
@@ -441,10 +417,7 @@ function validatePresets(obj: Record<string, unknown>): Record<string, unknown> 
 }
 
 /** `activePreset` names a preset that exists. */
-function validateActivePreset(
-  obj: Record<string, unknown>,
-  presets: Record<string, unknown>,
-): void {
+function validateActivePreset(obj: Record<string, unknown>, presets: Record<string, unknown>): void {
   // `activePreset` has to name a preset that actually exists. It is the key most
   // likely to be typo'd in a hand-edited override file, and without this the bad
   // name loads clean and routing quietly runs on whatever the state file or the
@@ -453,10 +426,8 @@ function validateActivePreset(
   const activePresetName = obj.activePreset as string;
   const presetNames = Object.keys(presets);
   const activeExists =
-    Object.prototype.hasOwnProperty.call(presets, activePresetName) ||
-    presetNames.some(
-      (n) => n.toLowerCase() === activePresetName.trim().toLowerCase(),
-    );
+    Object.hasOwn(presets, activePresetName) ||
+    presetNames.some((n) => n.toLowerCase() === activePresetName.trim().toLowerCase());
   if (!activeExists) {
     throw new Error(
       `tiers.json: 'activePreset' is '${activePresetName}', which is not a defined preset (defined: ${presetNames.join(", ")})`,
@@ -490,14 +461,10 @@ function validateModes(obj: Record<string, unknown>): void {
       }
       const m = mode as Record<string, unknown>;
       if (typeof m.defaultTier !== "string") {
-        throw new Error(
-          `tiers.json: mode '${modeName}.defaultTier' must be a string`,
-        );
+        throw new Error(`tiers.json: mode '${modeName}.defaultTier' must be a string`);
       }
       if (typeof m.description !== "string") {
-        throw new Error(
-          `tiers.json: mode '${modeName}.description' must be a string`,
-        );
+        throw new Error(`tiers.json: mode '${modeName}.description' must be a string`);
       }
     }
   }
@@ -512,9 +479,7 @@ function validateTierCaps(obj: Record<string, unknown>): void {
     const tc = obj.tierCaps as Record<string, unknown>;
     for (const [tierName, cap] of Object.entries(tc)) {
       if (typeof cap !== "number" || !Number.isFinite(cap) || cap < 1) {
-        throw new Error(
-          `tiers.json: tierCaps.'${tierName}' must be a positive integer`,
-        );
+        throw new Error(`tiers.json: tierCaps.'${tierName}' must be a positive integer`);
       }
     }
   }
@@ -529,9 +494,7 @@ function validateTierPrompts(obj: Record<string, unknown>): void {
     const tp = obj.tierPrompts as Record<string, unknown>;
     for (const [tierName, prompt] of Object.entries(tp)) {
       if (typeof prompt !== "string") {
-        throw new Error(
-          `tiers.json: tierPrompts.'${tierName}' must be a string`,
-        );
+        throw new Error(`tiers.json: tierPrompts.'${tierName}' must be a string`);
       }
     }
   }
@@ -546,9 +509,7 @@ function validateTierPromptsGoalOriented(obj: Record<string, unknown>): void {
     const tp = obj.tierPromptsGoalOriented as Record<string, unknown>;
     for (const [tierName, prompt] of Object.entries(tp)) {
       if (typeof prompt !== "string") {
-        throw new Error(
-          `tiers.json: tierPromptsGoalOriented.'${tierName}' must be a string`,
-        );
+        throw new Error(`tiers.json: tierPromptsGoalOriented.'${tierName}' must be a string`);
       }
     }
   }
@@ -566,10 +527,7 @@ function validateModelGenerations(obj: Record<string, unknown>): void {
     // Only `strong` is validated because only `strong` is read. Unknown keys —
     // including the removed `claude5x` — are ignored rather than rejected, so an
     // existing tiers.json carrying one still loads.
-    if (
-      modelGenerations.strong !== undefined &&
-      !Array.isArray(modelGenerations.strong)
-    ) {
+    if (modelGenerations.strong !== undefined && !Array.isArray(modelGenerations.strong)) {
       throw new Error("tiers.json: modelGenerations.strong must be an array");
     }
   }
@@ -582,9 +540,7 @@ function validateSubagentTiers(obj: Record<string, unknown>): void {
   }
   for (const [agentName, tierName] of Object.entries(obj.subagentTiers)) {
     if (typeof tierName !== "string" || tierName === "") {
-      throw new Error(
-        `tiers.json: subagentTiers.'${agentName}' must be a non-empty tier name`,
-      );
+      throw new Error(`tiers.json: subagentTiers.'${agentName}' must be a non-empty tier name`);
     }
   }
   // Deliberately not checking that the tier exists: a map may name a tier that
@@ -601,9 +557,7 @@ function validateTaskPatterns(obj: Record<string, unknown>): void {
     const tp = obj.taskPatterns as Record<string, unknown>;
     for (const [tierName, patterns] of Object.entries(tp)) {
       if (!Array.isArray(patterns)) {
-        throw new Error(
-          `tiers.json: taskPatterns.'${tierName}' must be an array of strings`,
-        );
+        throw new Error(`tiers.json: taskPatterns.'${tierName}' must be an array of strings`);
       }
     }
   }
@@ -618,31 +572,18 @@ function validateEnforcement(obj: Record<string, unknown>): void {
     const enforcement = obj.enforcement as Record<string, unknown>;
     if (enforcement.mode !== undefined) {
       if (!["off", "advisory", "enforced"].includes(enforcement.mode as string)) {
-        throw new Error(
-          "tiers.json: enforcement.mode must be one of off|advisory|enforced",
-        );
+        throw new Error("tiers.json: enforcement.mode must be one of off|advisory|enforced");
       }
     }
     if (enforcement.envGate !== undefined) {
       if (typeof enforcement.envGate !== "string" || !enforcement.envGate) {
-        throw new Error(
-          "tiers.json: enforcement.envGate must be a non-empty string",
-        );
+        throw new Error("tiers.json: enforcement.envGate must be a non-empty string");
       }
     }
-    if (
-      enforcement.verify !== undefined &&
-      typeof enforcement.verify === "object" &&
-      enforcement.verify !== null
-    ) {
+    if (enforcement.verify !== undefined && typeof enforcement.verify === "object" && enforcement.verify !== null) {
       const verify = enforcement.verify as Record<string, unknown>;
-      if (
-        verify.graderPolicy !== undefined &&
-        verify.graderPolicy !== "atLeastProducerTier"
-      ) {
-        throw new Error(
-          'tiers.json: enforcement.verify.graderPolicy must be "atLeastProducerTier"',
-        );
+      if (verify.graderPolicy !== undefined && verify.graderPolicy !== "atLeastProducerTier") {
+        throw new Error('tiers.json: enforcement.verify.graderPolicy must be "atLeastProducerTier"');
       }
       // `null` is the shipped default and means "no floor" — same as absent.
       if (
@@ -650,9 +591,7 @@ function validateEnforcement(obj: Record<string, unknown>): void {
         verify.minGraderTier !== null &&
         typeof verify.minGraderTier !== "string"
       ) {
-        throw new Error(
-          "tiers.json: enforcement.verify.minGraderTier must be a string or null",
-        );
+        throw new Error("tiers.json: enforcement.verify.minGraderTier must be a string or null");
       }
       if (verify.graderTemperature !== undefined) {
         if (
@@ -660,36 +599,23 @@ function validateEnforcement(obj: Record<string, unknown>): void {
           !Number.isFinite(verify.graderTemperature) ||
           verify.graderTemperature < 0
         ) {
-          throw new Error(
-            "tiers.json: enforcement.verify.graderTemperature must be a number >= 0",
-          );
+          throw new Error("tiers.json: enforcement.verify.graderTemperature must be a number >= 0");
         }
       }
       // Time-box ceilings. `>= 1` and not `>= 0`: a 0 or negative budget is
       // almost always meant as "no timeout", and silently reading it as an
       // immediately-expiring one would make every delegation fail. Reject it
       // at the config boundary and say so, rather than guessing.
-      for (const key of [
-        "delegateTimeoutMs",
-        "graderTimeoutMs",
-        "gateBudgetMs",
-      ] as const) {
+      for (const key of ["delegateTimeoutMs", "graderTimeoutMs", "gateBudgetMs"] as const) {
         const value = verify[key];
         if (value !== undefined) {
           if (!Number.isInteger(value) || (value as number) < 1) {
-            throw new Error(
-              `tiers.json: enforcement.verify.${key} must be an integer >= 1 (milliseconds)`,
-            );
+            throw new Error(`tiers.json: enforcement.verify.${key} must be an integer >= 1 (milliseconds)`);
           }
         }
       }
-      if (
-        verify.requireExplicitDoD !== undefined &&
-        typeof verify.requireExplicitDoD !== "boolean"
-      ) {
-        throw new Error(
-          "tiers.json: enforcement.verify.requireExplicitDoD must be a boolean",
-        );
+      if (verify.requireExplicitDoD !== undefined && typeof verify.requireExplicitDoD !== "boolean") {
+        throw new Error("tiers.json: enforcement.verify.requireExplicitDoD must be a boolean");
       }
     }
     if (
@@ -705,24 +631,14 @@ function validateEnforcement(obj: Record<string, unknown>): void {
       ) {
         const costCeiling = escalate.costCeiling as Record<string, unknown>;
         if (costCeiling.multiple !== undefined) {
-          if (
-            typeof costCeiling.multiple !== "number" ||
-            costCeiling.multiple <= 0
-          ) {
-            throw new Error(
-              "tiers.json: enforcement.escalate.costCeiling.multiple must be a number > 0",
-            );
+          if (typeof costCeiling.multiple !== "number" || costCeiling.multiple <= 0) {
+            throw new Error("tiers.json: enforcement.escalate.costCeiling.multiple must be a number > 0");
           }
         }
       }
       if (escalate.ladder !== undefined) {
-        if (
-          !Array.isArray(escalate.ladder) ||
-          !escalate.ladder.every((s: unknown) => typeof s === "string")
-        ) {
-          throw new Error(
-            "tiers.json: enforcement.escalate.ladder must be an array of strings",
-          );
+        if (!Array.isArray(escalate.ladder) || !escalate.ladder.every((s: unknown) => typeof s === "string")) {
+          throw new Error("tiers.json: enforcement.escalate.ladder must be an array of strings");
         }
       }
       if (escalate.maxAttemptsPerTier !== undefined) {
@@ -731,9 +647,7 @@ function validateEnforcement(obj: Record<string, unknown>): void {
           !Number.isInteger(escalate.maxAttemptsPerTier) ||
           escalate.maxAttemptsPerTier < 0
         ) {
-          throw new Error(
-            "tiers.json: enforcement.escalate.maxAttemptsPerTier must be an integer >= 0",
-          );
+          throw new Error("tiers.json: enforcement.escalate.maxAttemptsPerTier must be an integer >= 0");
         }
       }
       if (escalate.maxTotalAttempts !== undefined) {
@@ -742,19 +656,11 @@ function validateEnforcement(obj: Record<string, unknown>): void {
           !Number.isInteger(escalate.maxTotalAttempts) ||
           escalate.maxTotalAttempts < 1
         ) {
-          throw new Error(
-            "tiers.json: enforcement.escalate.maxTotalAttempts must be an integer >= 1",
-          );
+          throw new Error("tiers.json: enforcement.escalate.maxTotalAttempts must be an integer >= 1");
         }
       }
-      if (
-        escalate.floorTier !== undefined &&
-        escalate.floorTier !== null &&
-        typeof escalate.floorTier !== "string"
-      ) {
-        throw new Error(
-          "tiers.json: enforcement.escalate.floorTier must be a string or null",
-        );
+      if (escalate.floorTier !== undefined && escalate.floorTier !== null && typeof escalate.floorTier !== "string") {
+        throw new Error("tiers.json: enforcement.escalate.floorTier must be a string or null");
       }
     }
     if (
@@ -766,52 +672,32 @@ function validateEnforcement(obj: Record<string, unknown>): void {
       const perTier = enforcement.perTier as Record<string, unknown>;
       for (const [tierName, tierMode] of Object.entries(perTier)) {
         if (!["off", "advisory", "enforced"].includes(tierMode as string)) {
-          throw new Error(
-            `tiers.json: enforcement.perTier.${tierName} must be one of off|advisory|enforced`,
-          );
+          throw new Error(`tiers.json: enforcement.perTier.${tierName} must be one of off|advisory|enforced`);
         }
       }
     }
-    if (
-      enforcement.guard !== undefined &&
-      typeof enforcement.guard === "object" &&
-      enforcement.guard !== null
-    ) {
+    if (enforcement.guard !== undefined && typeof enforcement.guard === "object" && enforcement.guard !== null) {
       const guard = enforcement.guard as Record<string, unknown>;
       if (guard.budget !== undefined) {
-        if (
-          typeof guard.budget !== "number" ||
-          !Number.isFinite(guard.budget) ||
-          guard.budget < 1
-        ) {
+        if (typeof guard.budget !== "number" || !Number.isFinite(guard.budget) || guard.budget < 1) {
           throw new Error("tiers.json: enforcement.guard.budget must be a number >= 1");
         }
       }
       if (guard.blockScriptWrites !== undefined) {
         if (typeof guard.blockScriptWrites !== "boolean") {
-          throw new Error(
-            "tiers.json: enforcement.guard.blockScriptWrites must be a boolean",
-          );
+          throw new Error("tiers.json: enforcement.guard.blockScriptWrites must be a boolean");
         }
       }
       for (const key of ["readDraftCap", "sameOpRetryCap"] as const) {
         if (guard[key] !== undefined) {
-          if (
-            typeof guard[key] !== "number" ||
-            !Number.isInteger(guard[key]) ||
-            (guard[key] as number) < 0
-          ) {
-            throw new Error(
-              `tiers.json: enforcement.guard.${key} must be an integer >= 0`,
-            );
+          if (typeof guard[key] !== "number" || !Number.isInteger(guard[key]) || (guard[key] as number) < 0) {
+            throw new Error(`tiers.json: enforcement.guard.${key} must be an integer >= 0`);
           }
         }
       }
       for (const key of ["blockSelfScript", "deliverableFirst"] as const) {
         if (guard[key] !== undefined && typeof guard[key] !== "boolean") {
-          throw new Error(
-            `tiers.json: enforcement.guard.${key} must be a boolean`,
-          );
+          throw new Error(`tiers.json: enforcement.guard.${key} must be a boolean`);
         }
       }
     }
@@ -821,13 +707,8 @@ function validateEnforcement(obj: Record<string, unknown>): void {
       enforcement.proportional !== null
     ) {
       const proportional = enforcement.proportional as Record<string, unknown>;
-      if (
-        proportional.trivialBypass !== undefined &&
-        typeof proportional.trivialBypass !== "boolean"
-      ) {
-        throw new Error(
-          "tiers.json: enforcement.proportional.trivialBypass must be a boolean",
-        );
+      if (proportional.trivialBypass !== undefined && typeof proportional.trivialBypass !== "boolean") {
+        throw new Error("tiers.json: enforcement.proportional.trivialBypass must be a boolean");
       }
     }
   }
@@ -845,7 +726,6 @@ export function validateConfig(raw: unknown): RouterConfig {
   if (typeof raw !== "object" || raw === null) {
     throw new Error("tiers.json: expected a JSON object at root");
   }
-
 
   const obj = raw as Record<string, unknown>;
 
@@ -888,9 +768,7 @@ export function deepMerge(base: unknown, override: unknown): unknown {
     // helper should not be the thing that reparents an object.
     if (key === "__proto__" || key === "constructor") continue;
     result[key] =
-      key in result && isPlainObject(result[key]) && isPlainObject(value)
-        ? deepMerge(result[key], value)
-        : value;
+      key in result && isPlainObject(result[key]) && isPlainObject(value) ? deepMerge(result[key], value) : value;
   }
   return result;
 }
@@ -911,25 +789,19 @@ function readOverridesAt(op: string): Record<string, unknown> | undefined {
     // The file is there but unreadable (permissions, a dangling symlink, a
     // race with a delete). Every other failure below says so; staying silent
     // here makes an unreadable override look exactly like an absent one.
-    console.warn(
-      `[model-router] ignoring ${op}: cannot read it — ${(err as Error).message}`,
-    );
+    console.warn(`[model-router] ignoring ${op}: cannot read it — ${(err as Error).message}`);
     return undefined;
   }
 
   try {
     const parsed = parseJsonc(text) as unknown;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      console.warn(
-        `[model-router] ignoring ${op}: expected a JSON object at root`,
-      );
+      console.warn(`[model-router] ignoring ${op}: expected a JSON object at root`);
       return undefined;
     }
     return parsed as Record<string, unknown>;
   } catch (err) {
-    console.warn(
-      `[model-router] ignoring ${op}: invalid JSONC — ${(err as Error).message}`,
-    );
+    console.warn(`[model-router] ignoring ${op}: invalid JSONC — ${(err as Error).message}`);
     return undefined;
   }
 }
@@ -997,8 +869,7 @@ export function loadConfig(): RouterConfig {
   let cfg = validateConfig(base);
 
   if (layers.length > 0) {
-    const merge = (ls: OverrideLayer[]): unknown =>
-      ls.reduce<unknown>((acc, l) => deepMerge(acc, l.data), base);
+    const merge = (ls: OverrideLayer[]): unknown => ls.reduce<unknown>((acc, l) => deepMerge(acc, l.data), base);
 
     try {
       cfg = validateConfig(merge(layers));
@@ -1011,18 +882,18 @@ export function loadConfig(): RouterConfig {
         `[model-router] combined overrides are invalid (${(err as Error).message}); dropping conflicting layer(s)`,
       );
       for (let i = layers.length - 1; i >= 0; i--) {
+        const layer = layers[i];
+        if (!layer) continue;
         try {
-          cfg = validateConfig(merge([layers[i]!]));
+          cfg = validateConfig(merge([layer]));
           for (let j = 0; j < layers.length; j++) {
             if (j !== i) {
-              console.warn(`[model-router] dropped override layer ${layers[j]!.path}`);
+              console.warn(`[model-router] dropped override layer ${layers[j]?.path}`);
             }
           }
           break;
         } catch (singleErr) {
-          console.warn(
-            `[model-router] ignoring ${layers[i]!.path}: ${(singleErr as Error).message}`,
-          );
+          console.warn(`[model-router] ignoring ${layers[i]?.path}: ${(singleErr as Error).message}`);
           cfg = validateConfig(base);
         }
       }
@@ -1031,9 +902,7 @@ export function loadConfig(): RouterConfig {
 
   try {
     if (existsSync(statePath())) {
-      const state = JSON.parse(
-        readFileSync(statePath(), "utf-8"),
-      ) as RouterState;
+      const state = JSON.parse(readFileSync(statePath(), "utf-8")) as RouterState;
       if (state.activePreset) {
         const resolved = resolvePresetName(cfg, state.activePreset);
         if (resolved) {
@@ -1080,7 +949,7 @@ export function writeState(patch: Partial<RouterState>): void {
   const p = statePath();
   mkdirSync(dirname(p), { recursive: true });
   const tmp = `${p}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
   renameSync(tmp, p);
 }
 
@@ -1089,8 +958,6 @@ export function writeState(patch: Partial<RouterState>): void {
 // ---------------------------------------------------------------------------
 
 /** Returns the effective enforcement mode. Missing enforcement ⇒ mode:"advisory". */
-export function normalizeEnforcement(
-  e: EnforcementConfig | undefined,
-): { mode: "off" | "advisory" | "enforced" } {
+export function normalizeEnforcement(e: EnforcementConfig | undefined): { mode: "off" | "advisory" | "enforced" } {
   return { mode: e?.mode ?? "advisory" };
 }

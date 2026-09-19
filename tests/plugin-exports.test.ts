@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
+import antigravityModule from "../src/antigravity/index.js";
+import chatgptWebModule from "../src/chatgpt-web/index.js";
+import fallbackModule from "../src/fallback/index.js";
 import rootPlugin, {
-  openaiServerPlugin,
   antigravityServerPlugin,
   chatgptWebServerPlugin,
   fallbackPlugin,
-  universalModelManagerPlugin,
-  PLUGIN_ID,
+  openaiServerPlugin,
   PLUGIN_ALIASES,
+  PLUGIN_ID,
+  universalModelManagerPlugin,
 } from "../src/index.js";
 import openaiModule from "../src/openai/index.js";
-import antigravityModule from "../src/antigravity/index.js";
-import fallbackModule from "../src/fallback/index.js";
-import chatgptWebModule from "../src/chatgpt-web/index.js";
 
 describe("Plugin Module Exports", () => {
   it("uses the model-manager id and keeps backwards alias", () => {

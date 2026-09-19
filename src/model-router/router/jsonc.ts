@@ -16,7 +16,7 @@ export function stripJsonc(input: string): string {
   let inString = false;
 
   while (i < n) {
-    const c = input[i]!;
+    const c = input.charAt(i);
 
     if (inString) {
       if (c === "\\" && i + 1 < n) {
@@ -56,7 +56,7 @@ export function stripJsonc(input: string): string {
       // comments) closes an object or array.
       let j = i + 1;
       while (j < n) {
-        const d = input[j]!;
+        const d = input.charAt(j);
         if (d === " " || d === "\t" || d === "\n" || d === "\r") {
           j++;
         } else if (d === "/" && input[j + 1] === "/") {

@@ -1,13 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { TrajectoryToolEvent } from "../src/model-router/telemetry/trajectory.js";
 import {
   createTrajectory,
+  createTrajectoryStore,
+  dumpTrajectory,
   recordToolEvent,
   setStopReason,
   trajectoryMetrics,
-  dumpTrajectory,
-  createTrajectoryStore,
 } from "../src/model-router/telemetry/trajectory.js";
-import type { TrajectoryToolEvent } from "../src/model-router/telemetry/trajectory.js";
 
 describe("model-router/telemetry/trajectory.ts", () => {
   describe("createTrajectory & recordToolEvent", () => {

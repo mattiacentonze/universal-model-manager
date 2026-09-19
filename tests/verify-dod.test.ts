@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { DoD } from "../src/model-router/verify/dod.js";
 import {
-  summarizeDispatch,
-  normalizeDoD,
-  parseAcceptanceBlock,
-  parseDoDFromDispatch,
-  parseDoDFromAnnotation,
   inferDoD,
   isCheckable,
+  normalizeDoD,
+  parseAcceptanceBlock,
+  parseDoDFromAnnotation,
+  parseDoDFromDispatch,
+  summarizeDispatch,
 } from "../src/model-router/verify/dod.js";
-import type { DoD } from "../src/model-router/verify/dod.js";
 
 describe("model-router/verify/dod.ts", () => {
   describe("summarizeDispatch", () => {
@@ -164,9 +164,7 @@ check: fileExists path="valid.txt"
       });
 
       expect(dod.kind).toBe("deterministic");
-      expect(dod.checks).toEqual([
-        { kind: "fileExists", path: "src/schema.json" },
-      ]);
+      expect(dod.checks).toEqual([{ kind: "fileExists", path: "src/schema.json" }]);
       expect(dod.deliverable).toBe("src/schema.json");
     });
 
@@ -177,9 +175,7 @@ check: fileExists path="valid.txt"
       });
 
       expect(dod.kind).toBe("deterministic");
-      expect(dod.checks).toEqual([
-        { kind: "testsPass", command: "vitest run" },
-      ]);
+      expect(dod.checks).toEqual([{ kind: "testsPass", command: "vitest run" }]);
     });
 
     it("falls back to checker criteria when no checks are produced", () => {
@@ -194,37 +190,45 @@ check: fileExists path="valid.txt"
 
   describe("isCheckable", () => {
     it("returns true only when kind is not none and checks or criteria exist", () => {
-      expect(isCheckable({
-        kind: "deterministic",
-        checks: [{ kind: "fileExists", path: "a" }],
-        criteria: [],
-        deliverable: null,
-        source: "explicit",
-      })).toBe(true);
+      expect(
+        isCheckable({
+          kind: "deterministic",
+          checks: [{ kind: "fileExists", path: "a" }],
+          criteria: [],
+          deliverable: null,
+          source: "explicit",
+        }),
+      ).toBe(true);
 
-      expect(isCheckable({
-        kind: "checker",
-        checks: [],
-        criteria: ["done"],
-        deliverable: null,
-        source: "annotation",
-      })).toBe(true);
+      expect(
+        isCheckable({
+          kind: "checker",
+          checks: [],
+          criteria: ["done"],
+          deliverable: null,
+          source: "annotation",
+        }),
+      ).toBe(true);
 
-      expect(isCheckable({
-        kind: "none",
-        checks: [{ kind: "fileExists", path: "a" }],
-        criteria: [],
-        deliverable: null,
-        source: "none",
-      })).toBe(false);
+      expect(
+        isCheckable({
+          kind: "none",
+          checks: [{ kind: "fileExists", path: "a" }],
+          criteria: [],
+          deliverable: null,
+          source: "none",
+        }),
+      ).toBe(false);
 
-      expect(isCheckable({
-        kind: "deterministic",
-        checks: [],
-        criteria: [],
-        deliverable: null,
-        source: "none",
-      })).toBe(false);
+      expect(
+        isCheckable({
+          kind: "deterministic",
+          checks: [],
+          criteria: [],
+          deliverable: null,
+          source: "none",
+        }),
+      ).toBe(false);
     });
   });
 });

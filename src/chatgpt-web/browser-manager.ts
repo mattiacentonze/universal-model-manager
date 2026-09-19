@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { getChatGptProfileDir } from "../shared/paths.js";
-import { SessionStore } from "./session-store.js";
+import { type Browser, type BrowserContext, chromium } from "playwright-core";
 import { logger } from "../shared/logger.js";
-import { CHATGPT_BASE_URL, SELECTORS } from "./selectors.js";
+import { getChatGptProfileDir } from "../shared/paths.js";
+import { SELECTORS } from "./selectors.js";
+import { SessionStore } from "./session-store.js";
 
 const DEFAULT_CHROME_PATHS = [
   process.env.CHROME_PATH,
@@ -19,9 +19,7 @@ export function findExecutablePath(): string {
   for (const path of DEFAULT_CHROME_PATHS) {
     if (existsSync(path)) return path;
   }
-  throw new Error(
-    "Could not locate Google Chrome or Chromium executable. Set CHROME_PATH environment variable."
-  );
+  throw new Error("Could not locate Google Chrome or Chromium executable. Set CHROME_PATH environment variable.");
 }
 
 export class BrowserManager {
@@ -75,19 +73,29 @@ export class BrowserManager {
         const hasProfileBtn = await profileBtn.isVisible().catch(() => false);
 
         // 2. Check localStorage for user key
-        const userKey = await page.evaluate(() => {
-          try {
-            return Object.keys(localStorage).find(k => k.startsWith("cache/user-") || k.includes("user-")) || null;
-          } catch {
-            return null;
-          }
-        }).catch(() => null);
+        const userKey = await page
+          .evaluate(() => {
+            try {
+              return Object.keys(localStorage).find((k) => k.startsWith("cache/user-") || k.includes("user-")) || null;
+            } catch {
+              return null;
+            }
+          })
+          .catch(() => null);
 
         // 3. The guest "Log in" button must be absent from header/sidebar
-        const hasLoginBtn = await page.locator('button:has-text("Log in"), a:has-text("Log in")').first().isVisible().catch(() => false);
+        const hasLoginBtn = await page
+          .locator('button:has-text("Log in"), a:has-text("Log in")')
+          .first()
+          .isVisible()
+          .catch(() => false);
 
         // 4. Composer must be visible
-        const hasComposer = await page.locator(SELECTORS.composer).first().isVisible().catch(() => false);
+        const hasComposer = await page
+          .locator(SELECTORS.composer)
+          .first()
+          .isVisible()
+          .catch(() => false);
 
         // Truly authenticated: user profile or user key, composer visible, and NOT showing login buttons
         if ((hasProfileBtn || Boolean(userKey)) && hasComposer && !hasLoginBtn) {
@@ -106,7 +114,7 @@ export class BrowserManager {
           break;
         }
 
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 1000));
       }
 
       return loggedIn;

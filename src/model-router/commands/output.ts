@@ -11,18 +11,16 @@
  * what happened — which made the output impossible to test without a state
  * file on disk and a plugin instance to hang it off.
  */
-import type { RouterConfig, ModeConfig } from "../router/config.js";
-import { getActiveTiers } from "../router/protocol.js";
-import { resolvePromptStyle } from "../router/prompts.js";
+
 import type { Catalog, ModelIssue } from "../router/catalog.js";
+import type { ModeConfig, RouterConfig } from "../router/config.js";
+import { resolvePromptStyle } from "../router/prompts.js";
+import { getActiveTiers } from "../router/protocol.js";
 
 /** `/tiers` */
 export function buildTiersOutput(cfg: RouterConfig): string {
   const tiers = getActiveTiers(cfg);
-  const lines: string[] = [
-    `# Model Delegation Tiers`,
-    `Active preset: **${cfg.activePreset}**\n`,
-  ];
+  const lines: string[] = [`# Model Delegation Tiers`, `Active preset: **${cfg.activePreset}**\n`];
 
   for (const [name, tier] of Object.entries(tiers)) {
     const thinkingStr = tier.thinking
@@ -33,13 +31,10 @@ export function buildTiersOutput(cfg: RouterConfig): string {
     // The auto rule flips strong models to goal-oriented silently, so show the
     // style the dispatch actually resolves to. An explicit `tier.prompt` wins
     // outright (src/index.ts: `tier.prompt ?? selectTierPrompt(...)`).
-    const explicitStyle =
-      tier.promptStyle === "prescriptive" || tier.promptStyle === "goal-oriented";
+    const explicitStyle = tier.promptStyle === "prescriptive" || tier.promptStyle === "goal-oriented";
     const promptStr = tier.prompt
       ? " | prompt: custom"
-      : ` | prompt: ${resolvePromptStyle(tier.promptStyle, tier.model, cfg)} (${
-          explicitStyle ? "explicit" : "auto"
-        })`;
+      : ` | prompt: ${resolvePromptStyle(tier.promptStyle, tier.model, cfg)} (${explicitStyle ? "explicit" : "auto"})`;
     lines.push(`## @${name} -> \`${tier.model}\`${thinkingStr}${promptStr}`);
     if (tier.description) lines.push(tier.description);
     lines.push(`Steps: ${tier.steps ?? "default"}`);
@@ -48,7 +43,9 @@ export function buildTiersOutput(cfg: RouterConfig): string {
   }
 
   lines.push("## Delegation Rules");
-  cfg.rules.forEach((r) => lines.push(`- ${r}`));
+  for (const r of cfg.rules) {
+    lines.push(`- ${r}`);
+  }
   lines.push(`\nDefault tier: @${cfg.defaultTier}`);
   lines.push(`\nAvailable presets: ${Object.keys(cfg.presets).join(", ")}`);
   lines.push(`Switch with: \`/preset <name>\``);
@@ -76,7 +73,7 @@ export function buildPresetList(cfg: RouterConfig): string {
  * name, so the caller owns resolution and this only describes the outcome.
  */
 export function buildPresetSwitched(cfg: RouterConfig, name: string): string {
-  const tiers = cfg.presets[name]!;
+  const tiers = cfg.presets[name] ?? {};
   const models = Object.entries(tiers)
     .map(([tier, t]) => `  @${tier} -> ${t.model}`)
     .join("\n");
@@ -108,9 +105,7 @@ export function buildBudgetList(cfg: RouterConfig): string {
   const lines = ["# Routing Modes\n"];
   for (const [name, mode] of Object.entries(modes)) {
     const active = name === currentMode ? " <- active" : "";
-    lines.push(
-      `- **${name}**${active}: ${mode.description} (default tier: @${mode.defaultTier})`,
-    );
+    lines.push(`- **${name}**${active}: ${mode.description} (default tier: @${mode.defaultTier})`);
   }
   lines.push(`\nSwitch with: \`/budget <mode>\``);
   return lines.join("\n");
@@ -123,19 +118,14 @@ export function buildBudgetSwitched(mode: ModeConfig, name: string): string {
     "",
     mode.description,
     `Default tier: @${mode.defaultTier}`,
-    ...(mode.overrideRules?.length
-      ? ["", "Active rules:", ...mode.overrideRules.map((r) => `- ${r}`)]
-      : []),
+    ...(mode.overrideRules?.length ? ["", "Active rules:", ...mode.overrideRules.map((r) => `- ${r}`)] : []),
     "",
     "Mode change takes effect immediately on the next message.",
   ].join("\n");
 }
 
 /** `/budget <mode>` where the mode is not configured. */
-export function buildUnknownMode(
-  modes: Record<string, ModeConfig>,
-  requested: string,
-): string {
+export function buildUnknownMode(modes: Record<string, ModeConfig>, requested: string): string {
   return `Unknown mode: "${requested}". Available: ${Object.keys(modes).join(", ")}`;
 }
 
@@ -167,11 +157,9 @@ export function buildEnforceSet(mode: "off" | "advisory" | "enforced"): string {
 
 /** `/router enforce` with a missing or unrecognized mode. */
 export function buildEnforceStatus(current: string): string {
-  return [
-    `Current enforcement mode: **${current}**`,
-    "",
-    "Usage: `/router enforce <off|advisory|enforced>`",
-  ].join("\n");
+  return [`Current enforcement mode: **${current}**`, "", "Usage: `/router enforce <off|advisory|enforced>`"].join(
+    "\n",
+  );
 }
 
 /**
@@ -236,29 +224,19 @@ export function buildModelsOutput(
   // Orphan patterns are pure config analysis, so they are appended to EVERY
   // return path — including the catalog-unavailable ones, where the warning is
   // just as valid.
-  const suffix =
-    orphanedStrongPatterns.length > 0
-      ? "\n\n" +
-        formatOrphanedStrongPatterns(orphanedStrongPatterns)
-      : "";
+  const suffix = orphanedStrongPatterns.length > 0 ? `\n\n${formatOrphanedStrongPatterns(orphanedStrongPatterns)}` : "";
   if (!catalog) {
-    return (
-      "Model catalog unavailable — could not query opencode's providers." + suffix
-    );
+    return `Model catalog unavailable — could not query opencode's providers.${suffix}`;
   }
   if (catalog.providers.length === 0) {
-    return "No providers are configured/authenticated in opencode." + suffix;
+    return `No providers are configured/authenticated in opencode.${suffix}`;
   }
   const f = filter.trim().toLowerCase();
-  const providers = f
-    ? catalog.providers.filter((p) => p.id.toLowerCase() === f)
-    : catalog.providers;
+  const providers = f ? catalog.providers.filter((p) => p.id.toLowerCase() === f) : catalog.providers;
   if (providers.length === 0) {
-    return (
-      `No configured provider matches \`${filter.trim()}\`. Available: ${catalog.providers
-        .map((p) => p.id)
-        .join(", ")}.` + suffix
-    );
+    return `No configured provider matches \`${filter.trim()}\`. Available: ${catalog.providers
+      .map((p) => p.id)
+      .join(", ")}.${suffix}`;
   }
 
   const lines: string[] = ["# Model Router — available models", ""];
@@ -277,9 +255,7 @@ export function buildModelsOutput(
     }
     lines.push("");
   }
-  lines.push(
-    "Paste any id above into an overrides file (`/router overrides` shows where).",
-  );
+  lines.push("Paste any id above into an overrides file (`/router overrides` shows where).");
   return lines.join("\n") + suffix;
 }
 
@@ -305,26 +281,20 @@ export function formatModelIssues(issues: ModelIssue[]): string {
     const what =
       it.kind === "provider-unknown" || it.kind === "fallback-provider-unknown"
         ? `provider \`${it.providerId}\` is not configured/authenticated` +
-          (it.kind === "fallback-provider-unknown"
-            ? " — this fallback chain can never fire"
-            : "")
+          (it.kind === "fallback-provider-unknown" ? " — this fallback chain can never fire" : "")
         : it.kind === "fallback-preset-unknown"
           ? `chain entry \`${it.chainTarget}\` is not a defined preset and is silently dropped`
           : it.kind === "model-deprecated"
             ? `\`${it.ref}\` is **deprecated**`
             : `\`${it.ref}\` was not found`;
     // Fallback issues are keyed by the chain's provider, not by a tier.
-    const where =
-      it.scope === "fallback" ? `${it.tier}[${it.providerId}]` : `@${it.tier}`;
+    const where = it.scope === "fallback" ? `${it.tier}[${it.providerId}]` : `@${it.tier}`;
     let line = `- ${where}: ${what}.`;
     if (it.suggestions.length > 0) {
       line += ` Try: ${it.suggestions.map((s) => `\`${s}\``).join(", ")}.`;
     }
     lines.push(line);
   }
-  lines.push(
-    "",
-    "Set a replacement in your overrides file (`/router overrides`), then re-run `/router`.",
-  );
+  lines.push("", "Set a replacement in your overrides file (`/router overrides`), then re-run `/router`.");
   return lines.join("\n");
 }

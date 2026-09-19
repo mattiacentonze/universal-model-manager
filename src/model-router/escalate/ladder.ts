@@ -43,21 +43,14 @@ export function tierRank(tier: string, ladder: string[]): number {
   return ladder.indexOf(tier);
 }
 
-export function resolveStartTier(
-  producerTier: string,
-  policy: EscalatePolicy,
-): string {
+export function resolveStartTier(producerTier: string, policy: EscalatePolicy): string {
   const pi = tierRank(producerTier, policy.ladder);
-  const fi =
-    policy.floorTier != null ? tierRank(policy.floorTier, policy.ladder) : -1;
+  const fi = policy.floorTier != null ? tierRank(policy.floorTier, policy.ladder) : -1;
   const startIdx = Math.max(pi >= 0 ? pi : 0, fi >= 0 ? fi : 0);
   return policy.ladder[startIdx] ?? producerTier;
 }
 
-export function newLadderState(
-  producerTier: string,
-  policy: EscalatePolicy,
-): LadderState {
+export function newLadderState(producerTier: string, policy: EscalatePolicy): LadderState {
   return {
     currentTier: resolveStartTier(producerTier, policy),
     attemptsThisTier: 0,
@@ -68,35 +61,25 @@ export function newLadderState(
   };
 }
 
-export function recordAttempt(
-  state: LadderState,
-  costUnits = 0,
-): LadderState {
+export function recordAttempt(state: LadderState, costUnits = 0): LadderState {
   return {
     ...state,
     totalAttempts: state.totalAttempts + 1,
     cumulativeCost: state.cumulativeCost + costUnits,
-    firstAttemptCost:
-      state.firstAttemptCost == null ? costUnits : state.firstAttemptCost,
+    firstAttemptCost: state.firstAttemptCost == null ? costUnits : state.firstAttemptCost,
   };
 }
 
-export function nextTierAfter(
-  currentTier: string,
-  policy: EscalatePolicy,
-): string | null {
+export function nextTierAfter(currentTier: string, policy: EscalatePolicy): string | null {
   const ci = tierRank(currentTier, policy.ladder);
   if (ci >= 0 && ci + 1 <= policy.ladder.length - 1) {
-    return policy.ladder[ci + 1]!;
+    return policy.ladder[ci + 1] ?? null;
   }
   return null;
 }
 
 export function buildLadderForcingMessage(reasons: string[]): string {
-  const list =
-    reasons.length === 0
-      ? "- (no reasons provided)"
-      : reasons.map((r) => `- ${r}`).join("\n");
+  const list = reasons.length === 0 ? "- (no reasons provided)" : reasons.map((r) => `- ${r}`).join("\n");
   return (
     `[router escalation] previous attempt did not pass verification:\n` +
     list +
@@ -164,7 +147,7 @@ export function advance(state: LadderState, action: LadderAction): LadderState {
   if (action.action === "escalate") {
     return {
       ...state,
-      currentTier: action.tier!,
+      currentTier: action.tier ?? state.currentTier,
       attemptsThisTier: 0,
       escalations: state.escalations + 1,
     };
@@ -187,11 +170,7 @@ export function buildEscalatePolicy(cfg: RouterConfig): EscalatePolicy {
 /**
  * One-line, secret-free scorecard for a finished delegation (counts only).
  */
-export function formatLadderScorecard(
-  state: LadderState,
-  accepted: boolean,
-  method: string,
-): string {
+export function formatLadderScorecard(state: LadderState, accepted: boolean, method: string): string {
   return (
     `[router delegate scorecard | final_tier=${state.currentTier} | ` +
     `attempts=${state.totalAttempts} | escalations=${state.escalations} | ` +

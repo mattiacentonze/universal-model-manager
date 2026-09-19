@@ -5,8 +5,8 @@
 // Producer != grader is enforced structurally (GraderDispatch MUST create a FRESH session
 // each call) AND defensively here by sessionID inequality check (step 5).
 
-import type { Verdict } from "./types.js";
 import { scrubText } from "../guard/scrub.js";
+import type { Verdict } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -36,13 +36,11 @@ export interface GraderResult {
 }
 
 /** MUST create a FRESH session each call */
-export interface GraderDispatch {
-  (req: GraderRequest): Promise<GraderResult>;
-}
+export type GraderDispatch = (req: GraderRequest) => Promise<GraderResult>;
 
 export interface CheckerDeps {
   dispatchGrader: GraderDispatch;
-  ladder?: string[];             // default ["fast","medium","heavy"]
+  ladder?: string[]; // default ["fast","medium","heavy"]
   minGraderTier?: string | null; // optional floor
 }
 
@@ -66,7 +64,7 @@ export function tierRank(tier: string, ladder: string[]): number {
 
 export function atLeastProducerTier(
   producerTier: string,
-  opts?: { ladder?: string[]; minGraderTier?: string | null }
+  opts?: { ladder?: string[]; minGraderTier?: string | null },
 ): string {
   const ladder = opts?.ladder ?? ["fast", "medium", "heavy"];
   let idx = tierRank(producerTier, ladder);
@@ -101,13 +99,12 @@ function sanitizeOneLine(value: string): string {
     // renderers and tokenizers treat them as line breaks, so leaving them in
     // would reopen the forged-instruction hole that stripping \n closes.
     // eslint-disable-next-line no-control-regex
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control character stripping for security sanitization
     .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ")
     .trim();
   // A path has no legitimate reason to be long, and an unbounded one lets a
   // caller push the real criteria out of the grader's attention.
-  return cleaned.length > MAX_WORKING_DIR_CHARS
-    ? cleaned.slice(0, MAX_WORKING_DIR_CHARS) + "…(truncated)"
-    : cleaned;
+  return cleaned.length > MAX_WORKING_DIR_CHARS ? `${cleaned.slice(0, MAX_WORKING_DIR_CHARS)}…(truncated)` : cleaned;
 }
 
 export function buildGradingPrompt(input: CheckerInput): { system: string; prompt: string } {
@@ -183,18 +180,18 @@ export function parseGraderVerdict(text: string): { pass: boolean; reasons: stri
     if (typeof result !== "object" || result === null) return null;
 
     const r = result as Record<string, unknown>;
-    if (typeof r["pass"] !== "boolean") return null;
+    if (typeof r.pass !== "boolean") return null;
 
-    if (!("reasons" in r) || r["reasons"] === undefined) {
-      return { pass: r["pass"] as boolean, reasons: [] };
+    if (!("reasons" in r) || r.reasons === undefined) {
+      return { pass: r.pass as boolean, reasons: [] };
     }
 
-    if (!Array.isArray(r["reasons"])) return null;
-    for (const item of r["reasons"]) {
+    if (!Array.isArray(r.reasons)) return null;
+    for (const item of r.reasons) {
       if (typeof item !== "string") return null;
     }
 
-    return { pass: r["pass"] as boolean, reasons: r["reasons"] as string[] };
+    return { pass: r.pass as boolean, reasons: r.reasons as string[] };
   } catch {
     return null;
   }
@@ -232,7 +229,7 @@ export async function runChecker(input: CheckerInput, deps: CheckerDeps): Promis
     return {
       pass: false,
       method: "checker",
-      reasons: [scrubText("grader dispatch failed: " + String(err))],
+      reasons: [scrubText(`grader dispatch failed: ${String(err)}`)],
     };
   }
 
@@ -241,9 +238,7 @@ export async function runChecker(input: CheckerInput, deps: CheckerDeps): Promis
     return {
       pass: false,
       method: "checker",
-      reasons: [
-        "grader session is not independent of the producer (producer=grader); refusing to accept",
-      ],
+      reasons: ["grader session is not independent of the producer (producer=grader); refusing to accept"],
     };
   }
 
@@ -253,10 +248,7 @@ export async function runChecker(input: CheckerInput, deps: CheckerDeps): Promis
     return {
       pass: false,
       method: "checker",
-      reasons: [
-        "could not parse grader verdict; defaulting to FAIL",
-        scrubText(res.text.slice(0, 300)),
-      ],
+      reasons: ["could not parse grader verdict; defaulting to FAIL", scrubText(res.text.slice(0, 300))],
     };
   }
 
@@ -265,6 +257,6 @@ export async function runChecker(input: CheckerInput, deps: CheckerDeps): Promis
     pass: parsed.pass === true,
     method: "checker",
     reasons: parsed.reasons.map(scrubText),
-    evidence: scrubText("grader=" + graderTier),
+    evidence: scrubText(`grader=${graderTier}`),
   };
 }

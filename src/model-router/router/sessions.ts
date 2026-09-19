@@ -1,5 +1,5 @@
-import type { RouterConfig } from "./config.js";
 import { fingerprintToolCall } from "../guard/fingerprint.js";
+import type { RouterConfig } from "./config.js";
 import { DEFAULT_IDLE_TTL_MS } from "./idle-sweep.js";
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ export const CUMULATIVE_CAP_MULTIPLIER = 3;
 export function parseCapDirective(text: string): Cap | null {
   const m = text.match(/\bCAP\s*:\s*(none|\d+)\b/i);
   if (!m) return null;
-  const raw = m[1]!.toLowerCase();
+  const raw = m[1]?.toLowerCase();
   if (raw === "none") return "none";
   const n = parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -119,9 +119,7 @@ export function buildCapBanner(
         `[⚠ CAP REACHED (${state.calls}/${state.cap}): your NEXT response MUST be a return — do NOT make another read-only call. Start the response with DONE:, NEED MORE:, NEED CONTEXT:, SCOPE GROWTH:, or ESCALATE:.]`,
       );
     } else if (remaining <= 2) {
-      lines.push(
-        `[⚠ CAP WARNING: ${remaining} read-only call(s) remaining before forced return]`,
-      );
+      lines.push(`[⚠ CAP WARNING: ${remaining} read-only call(s) remaining before forced return]`);
     }
 
     // Cumulative ceiling across resumed dispatches. Intentionally follows the
@@ -161,7 +159,7 @@ export const READ_ONLY_TOOLS = new Set(["grep", "read", "glob", "ls"]);
 
 /** Normalise a taskPattern keyword to a lowercase stem for substring matching. */
 function normTaskKw(kw: string): string {
-  return kw.toLowerCase().split("(")[0]!.split("/")[0]!.trim();
+  return kw.toLowerCase().split("(")[0]?.split("/")[0]?.trim();
 }
 
 /**
@@ -185,8 +183,7 @@ const MULTI_STEP_RE =
  * Two items are deliberately NOT enough: "read a.json, b.json" is already caught
  * by the path count, and a two-item phrase is common in single-shot requests.
  */
-const ENUMERATION_RE =
-  /[\w./-]+\s*,\s*[\w./-]+\s*(?:,\s*[\w./-]+|\b(?:and|or)\s+[\w./-]+)/i;
+const ENUMERATION_RE = /[\w./-]+\s*,\s*[\w./-]+\s*(?:,\s*[\w./-]+|\b(?:and|or)\s+[\w./-]+)/i;
 
 /**
  * Bare distributive phrasing — "summarize every config file", "list all guard
@@ -283,19 +280,12 @@ const MAX_TRIVIAL_CHARS = 240;
  * Real work is still NEVER trivial, so bypass still cannot disable enforcement
  * on implementation.
  */
-export function classifyTrivial(
-  dispatchText: string,
-  tier: string | null,
-  cfg: RouterConfig,
-): boolean {
+export function classifyTrivial(dispatchText: string, tier: string | null, cfg: RouterConfig): boolean {
   if (tier !== "fast") return false;
   const raw = dispatchText || "";
   const text = raw.toLowerCase();
   if (!text.trim()) return false;
-  const disqualifiers = [
-    ...(cfg.taskPatterns?.medium ?? []),
-    ...(cfg.taskPatterns?.heavy ?? []),
-  ];
+  const disqualifiers = [...(cfg.taskPatterns?.medium ?? []), ...(cfg.taskPatterns?.heavy ?? [])];
   for (const kw of disqualifiers) {
     const n = normTaskKw(kw);
     if (n.length >= 3 && text.includes(n)) return false;
@@ -309,14 +299,10 @@ export function classifyTrivial(
   if (ENUMERATION_RE.test(raw)) return false;
   if (DISTRIBUTIVE_RE.test(raw)) return false;
 
-  const imperativeLines = raw
-    .split(/\r?\n/)
-    .filter((line) => IMPERATIVE_LINE_RE.test(line)).length;
+  const imperativeLines = raw.split(/\r?\n/).filter((line) => IMPERATIVE_LINE_RE.test(line)).length;
   if (imperativeLines > 1) return false;
 
-  const paths = new Set<string>(
-    (text.match(PATH_TOKEN_RE) ?? []).map((p) => p.trim()),
-  );
+  const paths = new Set<string>((text.match(PATH_TOKEN_RE) ?? []).map((p) => p.trim()));
   for (const bare of raw.match(BARE_FILENAME_RE) ?? []) {
     paths.add(bare.toLowerCase());
   }
@@ -466,10 +452,8 @@ export function createSessionStore(options: SessionStoreOptions = {}) {
       // config-derived guard budget, which never reads dispatch text, is the
       // real backstop.
       const parsed = parseCapDirective(dispatchText);
-      const override =
-        parsed === "none" && !/\breason:/i.test(dispatchText) ? null : parsed;
-      const baseline =
-        cfg.tierCaps?.[tierName] ?? DEFAULT_TIER_CAPS[tierName] ?? 5;
+      const override = parsed === "none" && !/\breason:/i.test(dispatchText) ? null : parsed;
+      const baseline = cfg.tierCaps?.[tierName] ?? DEFAULT_TIER_CAPS[tierName] ?? 5;
       const cap: Cap = override ?? baseline;
       const trivial = classifyTrivial(dispatchText, tierName, cfg);
       const existing = subagentCapState.get(input.sessionID);
@@ -532,8 +516,7 @@ export function createSessionStore(options: SessionStoreOptions = {}) {
 
       const banner = buildCapBanner(state, isRedundant, previousCall, input.tool);
 
-      const existing =
-        typeof outputRef.output === "string" ? outputRef.output : "";
+      const existing = typeof outputRef.output === "string" ? outputRef.output : "";
       outputRef.output = existing ? `${existing}\n\n${banner}` : banner;
     },
   };

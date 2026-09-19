@@ -20,7 +20,7 @@ export function fakeConfigDir(): string {
 export function writeProviderCreds(
   configDir: string,
   providers: Array<"openai" | "antigravity">,
-  opts: { openaiMainId?: string; openaiState?: Record<string, { refresh: string; expires?: number }> } = {}
+  opts: { openaiMainId?: string; openaiState?: Record<string, { refresh: string; expires?: number }> } = {},
 ): void {
   for (const p of providers) {
     if (p === "openai") {
@@ -33,14 +33,14 @@ export function writeProviderCreds(
           routing: { mode: "main-first" },
           mainAccountId: mainId,
           accounts: [{ id: mainId, accountId: mainId, type: "oauth", enabled: true }],
-        })}\n`
+        })}\n`,
       );
       writeFileSync(
         join(configDir, "openai-auth-state.json"),
         `${JSON.stringify({
           version: 1,
           accounts: opts.openaiState ?? { [mainId]: { refresh: "rt-main", expires: 4_100_000_000_000 } },
-        })}\n`
+        })}\n`,
       );
     } else {
       writeFileSync(
@@ -50,7 +50,7 @@ export function writeProviderCreds(
           activeIndex: 0,
           activeIndexByFamily: { claude: 0, gemini: 0 },
           accounts: [{ email: "acct@example.com", refreshToken: "rt-token", addedAt: 1, lastUsed: 1, enabled: true }],
-        })}\n`
+        })}\n`,
       );
     }
   }

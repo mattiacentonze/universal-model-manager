@@ -3,11 +3,11 @@
 // PURE: no I/O-capable Node built-ins; all I/O goes through DeterministicDeps
 // seams. ./paths is pure path math (node:path only) and keeps that contract.
 
-import type { Check, DoD } from "./dod.js";
-import type { Verdict, DeterministicDeps, MutexRegistry, ExecResult } from "./types.js";
-import { scrubText } from "../guard/scrub.js";
-import { resolveAgainst } from "./paths.js";
 import { isAbsolute } from "node:path";
+import { scrubText } from "../guard/scrub.js";
+import type { Check, DoD } from "./dod.js";
+import { resolveAgainst } from "./paths.js";
+import type { DeterministicDeps, ExecResult, MutexRegistry, Verdict } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // MutexRegistry — per-key serialization via promise-chaining
@@ -18,9 +18,18 @@ export function createMutexRegistry(): MutexRegistry {
   return {
     runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
       const prev = chains.get(key) ?? Promise.resolve();
-      const run = prev.then(() => fn(), () => fn());
+      const run = prev.then(
+        () => fn(),
+        () => fn(),
+      );
       // Tail swallows errors so the lock never wedges; run still rejects/resolves with fn's result.
-      chains.set(key, run.then(() => {}, () => {}));
+      chains.set(
+        key,
+        run.then(
+          () => {},
+          () => {},
+        ),
+      );
       return run;
     },
   };
@@ -31,8 +40,18 @@ export function createMutexRegistry(): MutexRegistry {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_ALLOWLIST = [
-  "npm", "npx", "pnpm", "yarn", "bun", "node",
-  "tsc", "tsx", "vitest", "jest", "eslint", "prettier",
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "bun",
+  "node",
+  "tsc",
+  "tsx",
+  "vitest",
+  "jest",
+  "eslint",
+  "prettier",
 ];
 
 // Any shell-chaining / redirection / substitution metacharacter.
@@ -41,9 +60,7 @@ export const FORBIDDEN_SHELL = /[;&|`$><\n]|\$\(|&&|\|\|/;
 
 // Interpreters that can execute arbitrary inline code via a flag. An allowlisted
 // interpreter must not be turned into an arbitrary-code runner (e.g. `node -e ...`).
-const INTERPRETERS = new Set([
-  "node", "deno", "bun", "tsx", "ts-node", "python", "python3", "ruby", "perl",
-]);
+const INTERPRETERS = new Set(["node", "deno", "bun", "tsx", "ts-node", "python", "python3", "ruby", "perl"]);
 // Inline-eval / inline-print flags: -e, -c, -p, --eval, --print (with optional =value).
 const EVAL_FLAG_RE = /^-(e|c|p)$|^--(eval|print)(=|$)/i;
 
@@ -69,11 +86,7 @@ export function isCommandAllowed(command: string, allowlist: string[]): boolean 
 // Shape check (exported for unit testing)
 // ---------------------------------------------------------------------------
 
-export function shapeMismatch(
-  schemaVal: unknown,
-  targetVal: unknown,
-  path = "",
-): string | null {
+export function shapeMismatch(schemaVal: unknown, targetVal: unknown, path = ""): string | null {
   if (schemaVal !== null && typeof schemaVal === "object" && !Array.isArray(schemaVal)) {
     // schema is a plain object
     if (targetVal === null || typeof targetVal !== "object" || Array.isArray(targetVal)) {
@@ -144,7 +157,7 @@ async function runRun(
     if (r.timedOut) {
       return { ok: false, reason: `run timed out after ${timeoutMs}ms: ${check.command}` };
     }
-    const out = r.stdout + "\n" + r.stderr;
+    const out = `${r.stdout}\n${r.stderr}`;
     if (check.expect !== undefined && !out.includes(check.expect)) {
       return {
         ok: false,
@@ -195,7 +208,7 @@ async function runCommandCheck(
       if (r.timedOut) {
         return { ok: false, reason: `${kind} timed out after ${timeoutMs}ms: ${command}` };
       }
-      const out = r.stdout + "\n" + r.stderr;
+      const out = `${r.stdout}\n${r.stderr}`;
       const ok = r.code === 0;
       if (!ok) {
         return {
@@ -306,15 +319,13 @@ export async function runDeterministic(dod: DoD, deps: DeterministicDeps): Promi
     results.push(result);
   }
 
-  const allPass = results.every(r => r.ok);
+  const allPass = results.every((r) => r.ok);
 
   const reasons: string[] = allPass
     ? [`all ${checks.length} deterministic checks passed`]
-    : results
-        .filter(r => !r.ok)
-        .map(r => scrubText(r.reason ?? "check failed"));
+    : results.filter((r) => !r.ok).map((r) => scrubText(r.reason ?? "check failed"));
 
-  const evidenceParts = results.map(r => r.evidence ?? "").filter(e => e.length > 0);
+  const evidenceParts = results.map((r) => r.evidence ?? "").filter((e) => e.length > 0);
   const rawEvidence = evidenceParts.length > 0 ? evidenceParts.join("\n---\n") : undefined;
   const evidence = rawEvidence !== undefined ? scrubText(rawEvidence) : undefined;
 

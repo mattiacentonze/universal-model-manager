@@ -3,7 +3,7 @@ export const CHATGPT_TEMPORARY_CHAT_URL = "https://chatgpt.com/?temporary-chat=t
 
 export const SELECTORS = {
   composer: [
-    '#prompt-textarea',
+    "#prompt-textarea",
     '[data-testid="prompt-textarea"]',
     '[contenteditable="true"][data-lexical-editor="true"]',
     'textarea[placeholder*="Ask"]',
@@ -25,13 +25,10 @@ export const SELECTORS = {
     '[data-testid^="conversation-turn-"][data-turn="assistant"]',
     '[data-testid^="conversation-turn-"][data-message-author-role="assistant"]',
     '[data-message-author-role="assistant"]',
-    'div[data-message-model-slug]',
+    "div[data-message-model-slug]",
   ].join(", "),
 
-  copyButton: [
-    'button[data-testid="copy-turn-action-button"]',
-    'button[aria-label="Copy"]',
-  ].join(", "),
+  copyButton: ['button[data-testid="copy-turn-action-button"]', 'button[aria-label="Copy"]'].join(", "),
 
   effortButton: [
     'button[aria-haspopup="menu"][data-tone="neutral"]',

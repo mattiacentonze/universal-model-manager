@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, cpSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

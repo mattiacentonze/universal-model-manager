@@ -3,21 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  applyTierPatch,
+  buildAgentConfig,
   completeStep,
   currentStep,
   emptyConfig,
   firstMissingStep,
+  isValidModelId,
   isWizardComplete,
   loadConfig,
   migrateConfig,
   resetManager,
   saveConfig,
-  validateConfig,
-  buildAgentConfig,
-  applyTierPatch,
   setTierTargets,
   tierTargets,
-  isValidModelId,
+  validateConfig,
 } from "../src/manager/index.js";
 import { fakeConfigDir, writeProviderCreds } from "./helpers.js";
 
@@ -79,13 +79,28 @@ describe("Manager persistence & confirmation-driven wizard", () => {
     completeStep("tiers", { fast: { model: "iit/deepseek-v4-flash" } }, dir);
     expect(firstMissingStep(loadConfig(dir))).toBe("tiers");
     // Confirm the remaining tiers -> router becomes next.
-    completeStep("tiers", { medium: { model: "openai/gpt-6-astra", variant: "medium" }, heavy: { model: "openai/gpt-6-astra", variant: "medium" } }, dir);
+    completeStep(
+      "tiers",
+      {
+        medium: { model: "openai/gpt-6-astra", variant: "medium" },
+        heavy: { model: "openai/gpt-6-astra", variant: "medium" },
+      },
+      dir,
+    );
     expect(firstMissingStep(loadConfig(dir))).toBe("router");
   });
 
   it("router requires orchestrator confirmation", () => {
     completeStep("accounts", { accounts: emptyConfig().accounts, accountsSkipAuth: true }, dir);
-    completeStep("tiers", { fast: { model: "iit/deepseek-v4-flash" }, medium: { model: "openai/gpt-6-astra" }, heavy: { model: "openai/gpt-6-astra" } }, dir);
+    completeStep(
+      "tiers",
+      {
+        fast: { model: "iit/deepseek-v4-flash" },
+        medium: { model: "openai/gpt-6-astra" },
+        heavy: { model: "openai/gpt-6-astra" },
+      },
+      dir,
+    );
     expect(firstMissingStep(loadConfig(dir))).toBe("router");
     completeStep("router", { orchestrator: "iit/deepseek-v4-flash", enabled: true }, dir);
     expect(isWizardComplete(loadConfig(dir))).toBe(true);
@@ -167,7 +182,23 @@ describe("Manager validation & strict file handling", () => {
 
   it("loadConfig throws on an unknown config version", () => {
     const dir = mkdtempSync(join(tmpdir(), "uamvu-"));
-    writeFileSync(join(dir, "manager.json"), JSON.stringify({ version: 99, accounts: [], router: { orchestrator: "a/b", enabled: true, tiers: { fast: { model: "a/b", fallback: [] }, medium: { model: "a/b", fallback: [] }, heavy: { model: "a/b", fallback: [] } } }, wizard: null }));
+    writeFileSync(
+      join(dir, "manager.json"),
+      JSON.stringify({
+        version: 99,
+        accounts: [],
+        router: {
+          orchestrator: "a/b",
+          enabled: true,
+          tiers: {
+            fast: { model: "a/b", fallback: [] },
+            medium: { model: "a/b", fallback: [] },
+            heavy: { model: "a/b", fallback: [] },
+          },
+        },
+        wizard: null,
+      }),
+    );
     expect(() => loadConfig(dir)).toThrow(/version/);
   });
 
@@ -183,14 +214,30 @@ describe("Manager validation & strict file handling", () => {
 
   it("validateConfig preserves exactly one main per provider", () => {
     const cfg = emptyConfig();
-    const v = validateConfig({ ...cfg, accounts: cfg.accounts.map(a => ({ ...a, main: true })) });
-    expect(v.accounts.filter(a => a.kind === "openai" && a.main)).toHaveLength(1);
-    expect(v.accounts.filter(a => a.kind === "antigravity" && a.main)).toHaveLength(1);
+    const v = validateConfig({ ...cfg, accounts: cfg.accounts.map((a) => ({ ...a, main: true })) });
+    expect(v.accounts.filter((a) => a.kind === "openai" && a.main)).toHaveLength(1);
+    expect(v.accounts.filter((a) => a.kind === "antigravity" && a.main)).toHaveLength(1);
   });
 
   it("migrates a legacy pre-manager file to the current version", () => {
     const dir = mkdtempSync(join(tmpdir(), "uammig-"));
-    writeFileSync(join(dir, "manager.json"), JSON.stringify({ version: 0, accounts: [{ id: "a", kind: "openai", label: "A", main: false, configured: false }], router: { orchestrator: "a/b", enabled: true, tiers: { fast: { model: "a/b", fallback: [] }, medium: { model: "a/b", fallback: [] }, heavy: { model: "a/b", fallback: [] } } }, wizard: null }));
+    writeFileSync(
+      join(dir, "manager.json"),
+      JSON.stringify({
+        version: 0,
+        accounts: [{ id: "a", kind: "openai", label: "A", main: false, configured: false }],
+        router: {
+          orchestrator: "a/b",
+          enabled: true,
+          tiers: {
+            fast: { model: "a/b", fallback: [] },
+            medium: { model: "a/b", fallback: [] },
+            heavy: { model: "a/b", fallback: [] },
+          },
+        },
+        wizard: null,
+      }),
+    );
     const cfg = migrateConfig(dir);
     expect(cfg.version).toBe(1);
   });
@@ -251,12 +298,12 @@ describe("Tier chain schema validation & canonical targets", () => {
     const cfg = emptyConfig();
     const agent = buildAgentConfig(cfg.router);
     expect(Object.keys(agent ?? {}).sort()).toEqual(["build", "fast", "heavy", "medium"]);
-    expect(typeof agent.build!.model).toBe("string");
-    expect(agent.build!.model).toBe(cfg.router.orchestrator);
-    expect(agent.fast!.model).toBe(cfg.router.tiers.fast.model);
-    expect(agent.medium!.variant).toBe("medium");
-    expect(agent.medium!.mode).toBe("subagent");
-    expect(agent.heavy!.fallback_models).toEqual(tierTargets(cfg.router.tiers.heavy).map(t => t.model));
-    expect(agent.build!.fallback_models).toContain(cfg.router.tiers.heavy.model);
+    expect(typeof agent.build?.model).toBe("string");
+    expect(agent.build?.model).toBe(cfg.router.orchestrator);
+    expect(agent.fast?.model).toBe(cfg.router.tiers.fast.model);
+    expect(agent.medium?.variant).toBe("medium");
+    expect(agent.medium?.mode).toBe("subagent");
+    expect(agent.heavy?.fallback_models).toEqual(tierTargets(cfg.router.tiers.heavy).map((t) => t.model));
+    expect(agent.build?.fallback_models).toContain(cfg.router.tiers.heavy.model);
   });
 });

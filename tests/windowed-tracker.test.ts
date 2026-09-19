@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
-import { WindowedTracker, WindowedRecord, WindowedAccountState } from "../src/telemetry/windowed-tracker.js";
+import { describe, expect, it } from "vitest";
 import { CostTracker } from "../src/telemetry/cost-tracker.js";
 import { LatencyTracker } from "../src/telemetry/latency-tracker.js";
+import { type WindowedAccountState, type WindowedRecord, WindowedTracker } from "../src/telemetry/windowed-tracker.js";
 
 interface TestRecord extends WindowedRecord {
   timestamp: number;
@@ -61,7 +61,7 @@ describe("WindowedTracker Core Generic", () => {
     tracker.record("user-b", 50);
     tracker.record("user-c", 75);
 
-    const ranked = tracker.rankAccounts(["user-a", "user-b", "user-c"], id => tracker.getSum(id));
+    const ranked = tracker.rankAccounts(["user-a", "user-b", "user-c"], (id) => tracker.getSum(id));
     expect(ranked).toEqual(["user-b", "user-c", "user-a"]);
   });
 

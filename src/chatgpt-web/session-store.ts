@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { getChatGptStorageStatePath } from "../shared/paths.js";
 import { logger } from "../shared/logger.js";
+import { getChatGptStorageStatePath } from "../shared/paths.js";
 
 export interface CookieItem {
   name: string;
@@ -59,20 +59,20 @@ export class SessionStore {
       const now = Date.now() / 1000;
       // Look for real session-like auth cookies or user storage
       const hasAuthCookie = data.cookies.some(
-        c => (c.domain.includes("chatgpt.com") || c.domain.includes("openai.com")) &&
-             (
-               c.name === "oai-sc" ||
-               c.name.startsWith("__Secure-next-auth.session-token") ||
-               c.name === "accessToken"
-             ) &&
-             (c.expires === -1 || c.expires > now)
+        (c) =>
+          (c.domain.includes("chatgpt.com") || c.domain.includes("openai.com")) &&
+          (c.name === "oai-sc" || c.name.startsWith("__Secure-next-auth.session-token") || c.name === "accessToken") &&
+          (c.expires === -1 || c.expires > now),
       );
 
-      const hasUserStorage = Array.isArray(data.origins) && data.origins.some(
-        o => o.origin.includes("chatgpt.com") &&
-             Array.isArray(o.localStorage) &&
-             o.localStorage.some(item => item.name.startsWith("cache/user-") || item.name.includes("user-"))
-      );
+      const hasUserStorage =
+        Array.isArray(data.origins) &&
+        data.origins.some(
+          (o) =>
+            o.origin.includes("chatgpt.com") &&
+            Array.isArray(o.localStorage) &&
+            o.localStorage.some((item) => item.name.startsWith("cache/user-") || item.name.includes("user-")),
+        );
 
       return hasAuthCookie || hasUserStorage;
     } catch {

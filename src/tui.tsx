@@ -1,7 +1,7 @@
-import type { TuiPlugin, TuiPluginModule, TuiPluginApi } from "@opencode-ai/plugin/tui";
-import { openWizard, accountsSettings, routerSettings, showReset } from "./tui/dialogs.js";
-import { getOpenCodeConfigDir } from "./shared/paths.js";
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { loadConfig, summarize } from "./manager/index.js";
+import { getOpenCodeConfigDir } from "./shared/paths.js";
+import { accountsSettings, openWizard, routerSettings, showReset } from "./tui/dialogs.js";
 import { ModelManagerSidebar } from "./tui/sidebar-widget.js";
 
 type Api = TuiPluginApi;
@@ -21,7 +21,7 @@ function sidebarWidget(api: Api) {
   }
 }
 
-export const tui: TuiPlugin = async (api, options, meta) => {
+export const tui: TuiPlugin = async (api, _options, _meta) => {
   // 1. Unified MODEL MANAGER sidebar widget (owns the right column).
   sidebarWidget(api);
 

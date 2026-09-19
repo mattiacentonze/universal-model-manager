@@ -1,8 +1,8 @@
 import type { Page } from "playwright-core";
-import { BrowserManager } from "./browser-manager.js";
-import { CHATGPT_TEMPORARY_CHAT_URL, SELECTORS } from "./selectors.js";
-import { resolveEffortIndex } from "./models.js";
 import { logger } from "../shared/logger.js";
+import type { BrowserManager } from "./browser-manager.js";
+import { resolveEffortIndex } from "./models.js";
+import { CHATGPT_TEMPORARY_CHAT_URL, SELECTORS } from "./selectors.js";
 
 export interface RunOptions {
   modelId?: string;
@@ -18,7 +18,7 @@ async function applyEffortLevel(page: Page, modelId: string | undefined): Promis
 
   try {
     const effortBtn = page.locator(SELECTORS.effortButton).first();
-    if (!await effortBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    if (!(await effortBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
       return; // Account does not have effort dropdown (e.g. Free/Luna)
     }
 
@@ -86,7 +86,11 @@ export class ChatGptRunner {
 
       // 5. Wait for generation to start
       await page.waitForTimeout(1000);
-      await page.locator(SELECTORS.stopButton).first().waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+      await page
+        .locator(SELECTORS.stopButton)
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 })
+        .catch(() => {});
 
       let fullText = "";
       let lastReportedLen = 0;
@@ -121,7 +125,11 @@ export class ChatGptRunner {
         }
 
         // Check if generation completed: stop button is gone and markdown answer is present
-        const isGenerating = await page.locator(SELECTORS.stopButton).first().isVisible().catch(() => false);
+        const isGenerating = await page
+          .locator(SELECTORS.stopButton)
+          .first()
+          .isVisible()
+          .catch(() => false);
 
         if (!isGenerating && hasMarkdown && currentContent.trim().length > 0) {
           await page.waitForTimeout(400);

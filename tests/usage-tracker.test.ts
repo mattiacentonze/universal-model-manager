@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { UsageTracker } from "../src/chatgpt-web/usage-tracker.js";
 
 describe("UsageTracker", () => {

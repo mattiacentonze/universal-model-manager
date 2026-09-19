@@ -1,11 +1,21 @@
-import type { AccountEntry, FallbackTarget, ManagerConfig, RouterSettings, TierChain, TierName, WizardStep } from "./types.js";
-import { firstMissingStep, loadConfig, saveConfig, setTierTargets, TIER_NAMES, isValidModelId } from "./store.js";
-import { providerConfigured } from "./auth-status.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
+import { firstMissingStep, isValidModelId, loadConfig, saveConfig, setTierTargets, TIER_NAMES } from "./store.js";
+import type {
+  AccountEntry,
+  FallbackTarget,
+  ManagerConfig,
+  RouterSettings,
+  TierChain,
+  TierName,
+  WizardStep,
+} from "./types.js";
 
 const nowIso = () => new Date().toISOString();
 
-export function applyTierPatch(base: RouterSettings, patch: Partial<Record<TierName, Partial<TierChain>>>): RouterSettings {
+export function applyTierPatch(
+  base: RouterSettings,
+  patch: Partial<Record<TierName, Partial<TierChain>>>,
+): RouterSettings {
   const tiers = { ...base.tiers };
   for (const tier of TIER_NAMES) {
     const p = patch[tier];
@@ -25,7 +35,7 @@ export function applyTierPatch(base: RouterSettings, patch: Partial<Record<TierN
 
 function mapTargets(chain: TierChain): FallbackTarget[] {
   const map = chain.fallbackVariants ?? {};
-  return (chain.fallback ?? []).map(model => ({ model, variant: map[model] }));
+  return (chain.fallback ?? []).map((model) => ({ model, variant: map[model] }));
 }
 
 export interface WizardResult {
@@ -41,7 +51,7 @@ function ensureWizard(cfg: ManagerConfig) {
 
 function markCompleted(cfg: ManagerConfig, step: WizardStep) {
   ensureWizard(cfg);
-  if (!cfg.wizard!.completed.includes(step)) cfg.wizard!.completed.push(step);
+  if (!cfg.wizard?.completed.includes(step)) cfg.wizard?.completed.push(step);
 }
 
 /**
@@ -49,35 +59,46 @@ function markCompleted(cfg: ManagerConfig, step: WizardStep) {
  * Each successful per-field selection is saved; confirmation is explicit, so a
  * tier is only "done" when its chain is valid AND the user confirmed it.
  */
-export function completeStep(step: WizardStep, values: Record<string, unknown>, dir?: string, configDir = getOpenCodeConfigDir()): WizardResult {
+export function completeStep(
+  step: WizardStep,
+  values: Record<string, unknown>,
+  dir?: string,
+  configDir = getOpenCodeConfigDir(),
+): WizardResult {
   const cfg = loadConfig(dir);
   ensureWizard(cfg);
 
   if (step === "accounts") {
     if (Array.isArray(values.accounts)) {
-      const accounts = (values.accounts as AccountEntry[]).map(a => ({ ...a }));
+      const accounts = (values.accounts as AccountEntry[]).map((a) => ({ ...a }));
       for (const kind of ["openai", "antigravity", "chatgpt-web"] as const) {
-        const ofKind = accounts.filter(a => a.kind === kind);
+        const ofKind = accounts.filter((a) => a.kind === kind);
         if (ofKind.length > 0) {
-          ofKind.forEach(a => (a.main = a === ofKind[0]));
+          for (const a of ofKind) {
+            a.main = a === ofKind[0];
+          }
           ofKind[0].main = true;
         }
       }
       cfg.accounts = accounts;
     }
-    if (values.accountsSkipAuth === true) cfg.wizard!.accountsSkipAuth = true;
-    cfg.wizard!.accountsConfirmed = true;
+    if (cfg.wizard) {
+      if (values.accountsSkipAuth === true) cfg.wizard.accountsSkipAuth = true;
+      cfg.wizard.accountsConfirmed = true;
+    }
     markCompleted(cfg, "accounts");
   } else if (step === "tiers") {
     const patch = values as Partial<Record<TierName, Partial<TierChain>>>;
     cfg.router = applyTierPatch(cfg.router, patch);
     ensureWizard(cfg);
-    cfg.wizard!.tiersConfirmed ??= {};
-    for (const tier of TIER_NAMES) {
-      const chain = cfg.router.tiers[tier];
-      if (patch[tier] && isValidModelId(chain.model)) cfg.wizard!.tiersConfirmed[tier] = true;
+    if (cfg.wizard) {
+      cfg.wizard.tiersConfirmed ??= {};
+      for (const tier of TIER_NAMES) {
+        const chain = cfg.router.tiers[tier];
+        if (patch[tier] && isValidModelId(chain.model)) cfg.wizard.tiersConfirmed[tier] = true;
+      }
+      if (TIER_NAMES.every((t) => cfg.wizard?.tiersConfirmed?.[t])) markCompleted(cfg, "tiers");
     }
-    if (TIER_NAMES.every(t => cfg.wizard!.tiersConfirmed![t])) markCompleted(cfg, "tiers");
   } else if (step === "router") {
     if (typeof values.orchestrator === "string" && isValidModelId(values.orchestrator)) {
       cfg.router = {
@@ -85,9 +106,13 @@ export function completeStep(step: WizardStep, values: Record<string, unknown>, 
         orchestrator: values.orchestrator,
         enabled: values.enabled !== false,
         ...(typeof values.orchestratorVariant === "string" ? { orchestratorVariant: values.orchestratorVariant } : {}),
-        ...(Array.isArray(values.orchestratorFallbacks) ? { orchestratorFallbacks: values.orchestratorFallbacks as string[] } : {}),
+        ...(Array.isArray(values.orchestratorFallbacks)
+          ? { orchestratorFallbacks: values.orchestratorFallbacks as string[] }
+          : {}),
       };
-      cfg.wizard!.routerConfirmed = true;
+      if (cfg.wizard) {
+        cfg.wizard.routerConfirmed = true;
+      }
       markCompleted(cfg, "router");
     }
   }

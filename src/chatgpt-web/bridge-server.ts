@@ -1,10 +1,10 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { CHATGPT_WEB_MODELS } from "./models.js";
+import { createServer, type IncomingMessage, type Server } from "node:http";
+import { logger } from "../shared/logger.js";
 import { ChatGptRunner } from "./chatgpt-runner.js";
+import { CHATGPT_WEB_MODELS } from "./models.js";
 import { SessionStore } from "./session-store.js";
 import { usageTracker } from "./usage-tracker.js";
-import { logger } from "../shared/logger.js";
 
 export interface BridgeServerOptions {
   port?: number;
@@ -16,7 +16,7 @@ export interface BridgeServerOptions {
 function parseJsonBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", chunk => (data += chunk));
+    req.on("data", (chunk) => (data += chunk));
     req.on("end", () => {
       try {
         resolve(data ? JSON.parse(data) : {});
@@ -31,7 +31,7 @@ function parseJsonBody(req: IncomingMessage): Promise<any> {
 function extractPromptFromMessages(messages: Array<{ role?: string; content?: any }>): string {
   if (!Array.isArray(messages) || messages.length === 0) return "";
   return messages
-    .map(m => {
+    .map((m) => {
       const role = m.role || "user";
       const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
       return `${role.toUpperCase()}: ${content}`;
@@ -43,9 +43,9 @@ function extractPromptFromResponsesInput(input: any): string {
   if (typeof input === "string") return input;
   if (Array.isArray(input)) {
     return input
-      .map(item => {
+      .map((item) => {
         if (typeof item === "string") return item;
-        if (item && item.content) {
+        if (item?.content) {
           return typeof item.content === "string" ? item.content : JSON.stringify(item.content);
         }
         return JSON.stringify(item);
@@ -93,13 +93,13 @@ export class BridgeServer {
               host: this.host,
               port: this.port,
               hasValidSession: this.sessionStore.hasValidSession(),
-            })
+            }),
           );
           return;
         }
 
         if (method === "GET" && (url.pathname === "/v1/models" || url.pathname === "/models")) {
-          const modelsList = Object.values(CHATGPT_WEB_MODELS).map(m => ({
+          const modelsList = Object.values(CHATGPT_WEB_MODELS).map((m) => ({
             id: m.id,
             object: "model",
             created: 1700000000,
@@ -127,7 +127,7 @@ export class BridgeServer {
 
             await this.runner.runPrompt(prompt, {
               modelId: model,
-              onDelta: delta => {
+              onDelta: (delta) => {
                 const chunk = {
                   id,
                   object: "chat.completion.chunk",
@@ -185,12 +185,12 @@ export class BridgeServer {
                 type: "response.output_item.added",
                 output_index: 0,
                 item: { type: "message", id },
-              })}\n\n`
+              })}\n\n`,
             );
 
             await this.runner.runPrompt(prompt, {
               modelId: model,
-              onDelta: delta => {
+              onDelta: (delta) => {
                 const chunk = {
                   type: "response.output_text.delta",
                   item_id: id,
@@ -230,7 +230,7 @@ export class BridgeServer {
                     content: [{ type: "output_text", text: answer }],
                   },
                 ],
-              })
+              }),
             );
           }
           return;
@@ -248,18 +248,18 @@ export class BridgeServer {
     });
 
     return new Promise((resolve, reject) => {
-      this.server!.listen(this.port, this.host, () => {
+      this.server?.listen(this.port, this.host, () => {
         logger.info(`Bridge server running on http://${this.host}:${this.port}`);
         resolve();
       });
-      this.server!.on("error", reject);
+      this.server?.on("error", reject);
     });
   }
 
   async stop(): Promise<void> {
     if (!this.server) return;
     return new Promise((resolve, reject) => {
-      this.server!.close(err => {
+      this.server?.close((err) => {
         this.server = null;
         if (err) reject(err);
         else resolve();

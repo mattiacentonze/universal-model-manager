@@ -1,12 +1,22 @@
-import { tool } from "@opencode-ai/plugin";
 import type { PluginInput } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
+import { advance, buildEscalatePolicy, newLadderState, nextAction, recordAttempt } from "./escalate/ladder.js";
+import { scrubText } from "./guard/scrub.js";
+import type { createGuardStore } from "./guard/store.js";
 import type { RouterConfig, TierConfig } from "./router/config.js";
 import { loadConfig } from "./router/config.js";
 import { getActiveTiers } from "./router/protocol.js";
-import { scrubText } from "./guard/scrub.js";
-import { accept } from "./verify/gate.js";
+import type { createSessionStore } from "./router/sessions.js";
+import { dumpDelegateScorecard } from "./telemetry/scorecard-dump.js";
+import {
+  buildAcceptedSuffix,
+  buildDelegationDoD,
+  buildForcingNote,
+  type createChangedFileStore,
+  tierModel,
+} from "./verify/dispatch.js";
 import type { GateDeps } from "./verify/gate.js";
-import { extractAssistantText } from "./verify/wiring.js";
+import { accept } from "./verify/gate.js";
 import {
   DEFAULT_DELEGATE_PROMPT_TIMEOUT_MS,
   DEFAULT_GATE_BUDGET_MS,
@@ -14,23 +24,7 @@ import {
   timeoutMs,
   withTimeout,
 } from "./verify/timeout.js";
-import {
-  buildDelegationDoD,
-  tierModel,
-  buildForcingNote,
-  buildAcceptedSuffix,
-  createChangedFileStore,
-} from "./verify/dispatch.js";
-import {
-  newLadderState,
-  recordAttempt,
-  nextAction,
-  advance,
-  buildEscalatePolicy,
-} from "./escalate/ladder.js";
-import { createSessionStore } from "./router/sessions.js";
-import { createGuardStore } from "./guard/store.js";
-import { dumpDelegateScorecard } from "./telemetry/scorecard-dump.js";
+import { extractAssistantText } from "./verify/wiring.js";
 
 export type ChangedFileStore = ReturnType<typeof createChangedFileStore>;
 export type SessionStore = ReturnType<typeof createSessionStore>;
@@ -89,9 +83,7 @@ export async function executeDelegate(
       activeCfg = deps.getConfig();
     }
     const initialTier =
-      typeof args.tier === "string" && args.tier.trim()
-        ? args.tier.trim()
-        : activeCfg.defaultTier || "medium";
+      typeof args.tier === "string" && args.tier.trim() ? args.tier.trim() : activeCfg.defaultTier || "medium";
     const dod = buildDelegationDoD({
       prompt: args.task,
       acceptance: args.acceptance,
@@ -102,11 +94,7 @@ export async function executeDelegate(
     const tiersForCost: Record<string, TierConfig> = getActiveTiers(activeCfg);
 
     // Independent safety net: even a policy bug cannot loop unbounded.
-    const safetyMax =
-      Math.max(
-        policy.maxTotalAttempts,
-        policy.ladder.length * (policy.maxAttemptsPerTier + 1),
-      ) + 2;
+    const safetyMax = Math.max(policy.maxTotalAttempts, policy.ladder.length * (policy.maxAttemptsPerTier + 1)) + 2;
     let safety = 0;
 
     let producerText = "";
@@ -126,9 +114,7 @@ export async function executeDelegate(
       text: string;
       gateRes: Awaited<ReturnType<typeof accept>>;
     } | null> => {
-      const taskText = forcingNote
-        ? `${scrubText(forcingNote)}\n\n${args.task}`
-        : args.task;
+      const taskText = forcingNote ? `${scrubText(forcingNote)}\n\n${args.task}` : args.task;
 
       const created = (await deps.client.session.create({
         body: {
@@ -165,16 +151,12 @@ export async function executeDelegate(
               parts: [{ type: "text", text: taskText }],
             },
           }),
-          timeoutMs(
-            activeCfg.enforcement?.verify?.delegateTimeoutMs,
-            DEFAULT_DELEGATE_PROMPT_TIMEOUT_MS,
-          ),
+          timeoutMs(activeCfg.enforcement?.verify?.delegateTimeoutMs, DEFAULT_DELEGATE_PROMPT_TIMEOUT_MS),
           "delegate producer prompt",
         )) as SessionPromptResponse | undefined;
         attemptProducerText = extractAssistantText(res);
       } catch (error) {
-        producerError =
-          error instanceof Error ? error.message : String(error);
+        producerError = error instanceof Error ? error.message : String(error);
         attemptProducerText = "";
       }
 
@@ -186,13 +168,10 @@ export async function executeDelegate(
         producerTier: tier,
       };
 
-      const gateBudgetMs = timeoutMs(
-        activeCfg.enforcement?.verify?.gateBudgetMs,
-        DEFAULT_GATE_BUDGET_MS,
-      );
+      const gateBudgetMs = timeoutMs(activeCfg.enforcement?.verify?.gateBudgetMs, DEFAULT_GATE_BUDGET_MS);
       // Grader sessions opened by THIS accept() call, and only those.
       const gateGraderSessions = new Set<string>();
-      let gateRes;
+      let gateRes: Awaited<ReturnType<typeof accept>>;
       try {
         gateRes = producerError
           ? {
@@ -284,34 +263,17 @@ export async function executeDelegate(
       const producerSid = attempt.sessionID;
       const gateRes = attempt.gateRes;
 
-      const costRatio =
-        typeof tiersForCost?.[tier]?.costRatio === "number"
-          ? tiersForCost[tier].costRatio
-          : 1;
+      const costRatio = typeof tiersForCost?.[tier]?.costRatio === "number" ? tiersForCost[tier].costRatio : 1;
       state = recordAttempt(state, costRatio);
 
-      const action = nextAction(
-        state,
-        { pass: gateRes.accepted, reasons: gateRes.verdict.reasons },
-        policy,
-      );
+      const action = nextAction(state, { pass: gateRes.accepted, reasons: gateRes.verdict.reasons }, policy);
 
       if (action.action === "accept") {
-        dumpScorecardFn(
-          producerSid,
-          state,
-          true,
-          gateRes.verdict.method,
-        );
+        dumpScorecardFn(producerSid, state, true, gateRes.verdict.method);
         return producerText + buildAcceptedSuffix(gateRes.verdict.method);
       }
       if (action.action === "give_up") {
-        dumpScorecardFn(
-          producerSid,
-          state,
-          false,
-          gateRes.verdict.method,
-        );
+        dumpScorecardFn(producerSid, state, false, gateRes.verdict.method);
         const note = scrubText(buildForcingNote(gateRes.verdict.reasons));
         return (
           `[router status: unmet] The delegated result was not accepted after ` +
@@ -345,13 +307,8 @@ export function createDelegateTool(deps: DelegateDeps): ReturnType<typeof tool> 
     description:
       "Delegate a task to a tier subagent (fast | medium | heavy). The subagent's result is INDEPENDENTLY VERIFIED (deterministic checks, or an independent grader at >= the producer tier in a fresh session) before it is returned. Returns an accepted result on PASS, or an honest 'unmet' status on FAIL — never a self-reported completion. Optionally pass an [acceptance]...[/acceptance] block to define the Definition of Done.",
     args: {
-      task: tool.schema
-        .string()
-        .describe("The task for the subagent to perform."),
-      tier: tool.schema
-        .string()
-        .optional()
-        .describe("fast | medium | heavy. Defaults to the router default tier."),
+      task: tool.schema.string().describe("The task for the subagent to perform."),
+      tier: tool.schema.string().optional().describe("fast | medium | heavy. Defaults to the router default tier."),
       acceptance: tool.schema
         .string()
         .optional()

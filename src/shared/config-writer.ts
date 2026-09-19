@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyEdits, modify, parse } from "jsonc-parser";
-import { getOpenCodeConfigDir } from "./paths.js";
 import { loadConfig, tierTargets } from "../manager/index.js";
-import { PLUGIN_ID, PLUGIN_ALIASES } from "./constants.js";
+import { PLUGIN_ALIASES, PLUGIN_ID } from "./constants.js";
+import { getOpenCodeConfigDir } from "./paths.js";
 
 export interface SetupOptions {
   configPath?: string;
@@ -71,7 +71,7 @@ function ownedNames(refs: Refs): string[] {
 function matchesOwned(name: string | undefined | null, owned: string[]): boolean {
   if (!name) return false;
   if (owned.includes(name)) return true;
-  return owned.some(base => !base.startsWith("file:") && name.startsWith(`${base}@`));
+  return owned.some((base) => !base.startsWith("file:") && name.startsWith(`${base}@`));
 }
 
 /** Plugin entries may be a bare string or a `[name, options]` tuple. */
@@ -168,14 +168,13 @@ export function applyUniversalConfigUpdates(content: string, options: SetupOptio
   const ownRefs: string[] = [PLUGIN_ID, `${PLUGIN_ID}/antigravity`, ...PLUGIN_ALIASES, refs.main, refs.antigravity];
   const toRemove = replaceLegacy ? owned : ownRefs;
   let plugins = Array.isArray(parsed.plugin) ? [...parsed.plugin] : [];
-  plugins = plugins.filter(p => !matchesOwned(pluginName(p), toRemove));
+  plugins = plugins.filter((p) => !matchesOwned(pluginName(p), toRemove));
   plugins.push(refs.main, refs.antigravity);
 
   current = applyEdits(current, modify(current, ["plugin"], plugins, FMT));
 
   if (options.writeAgentChains === true) {
-    const agentCfg: any =
-      parsed.agent && typeof parsed.agent === "object" ? { ...parsed.agent } : {};
+    const agentCfg: any = parsed.agent && typeof parsed.agent === "object" ? { ...parsed.agent } : {};
     const map = flatAgentMap(loadConfig().router);
     const buildModel = map.build.model;
     for (const tier of ["fast", "medium", "heavy"] as const) agentCfg[tier] = map.tiers[tier];
@@ -202,7 +201,12 @@ export function applyUniversalConfigRemoval(content: string, root?: string): str
   current = applyEdits(current, modify(current, ["plugin"], plugins, FMT));
 
   const cp = parsed.provider?.["chatgpt-web"];
-  if (cp && typeof cp === "object" && (cp as any)?.npm === "@ai-sdk/openai" && (cp as any)?.options?.apiKey === "local-session") {
+  if (
+    cp &&
+    typeof cp === "object" &&
+    (cp as any)?.npm === "@ai-sdk/openai" &&
+    (cp as any)?.options?.apiKey === "local-session"
+  ) {
     current = applyEdits(current, modify(current, ["provider", "chatgpt-web"], undefined, FMT));
   }
 
@@ -210,19 +214,22 @@ export function applyUniversalConfigRemoval(content: string, root?: string): str
 }
 
 function removeTuiEntries(content: string, refs: Refs): { content: string; changed: boolean } {
-  const owned = ownedNames(refs).filter(o => o === refs.tui || o === PLUGIN_ID || PLUGIN_ALIASES.includes(o));
+  const owned = ownedNames(refs).filter((o) => o === refs.tui || o === PLUGIN_ID || PLUGIN_ALIASES.includes(o));
   const parsed = parseStrict(content);
   const plugins = Array.isArray(parsed.plugin)
-    ? (parsed.plugin as unknown[]).filter(p => !matchesOwned(pluginName(p), owned))
+    ? (parsed.plugin as unknown[]).filter((p) => !matchesOwned(pluginName(p), owned))
     : [];
   const updated = applyEdits(content, modify(content, ["plugin"], plugins, FMT));
   return { content: updated, changed: updated !== content };
 }
 
-export function removeUniversalConfig(options: { configPath?: string; tuiConfigPath?: string; backup?: boolean; localPluginPath?: string } = {}): { path: string; modified: boolean } {
+export function removeUniversalConfig(
+  options: { configPath?: string; tuiConfigPath?: string; backup?: boolean; localPluginPath?: string } = {},
+): { path: string; modified: boolean } {
   const refs = refsForOptions({ localPluginPath: options.localPluginPath });
   const file = options.configPath || findOpenCodeConfigFile();
-  const tuiFile = options.tuiConfigPath || (options.configPath ? join(dirname(options.configPath), "tui.json") : findTuiConfigFile());
+  const tuiFile =
+    options.tuiConfigPath || (options.configPath ? join(dirname(options.configPath), "tui.json") : findTuiConfigFile());
 
   if (!existsSync(file) && !existsSync(tuiFile)) return { path: file, modified: false };
 
@@ -237,13 +244,13 @@ export function removeUniversalConfig(options: { configPath?: string; tuiConfigP
   let modified = false;
   if (options.backup) {
     if (serverOriginal !== null && serverUpdated !== serverOriginal) backupFile(file);
-    if (tui && tui.changed) backupFile(tuiFile);
+    if (tui?.changed) backupFile(tuiFile);
   }
   if (serverUpdated !== null && serverUpdated !== serverOriginal) {
     writeJsonc(file, serverUpdated);
     modified = true;
   }
-  if (tui && tui.changed) {
+  if (tui?.changed) {
     writeJsonc(tuiFile, tui.content);
     modified = true;
   }
@@ -253,22 +260,29 @@ export function removeUniversalConfig(options: { configPath?: string; tuiConfigP
 export function setupOpenCodeConfig(options: SetupOptions = {}): { path: string; modified: boolean } {
   const refs = refsForOptions(options);
   // Fail fast on a local checkout missing its built entrypoints — before any write.
-  for (const f of [`${refs.root}/dist/index.js`, `${refs.root}/dist/antigravity/index.js`, `${refs.root}/src/tui/entry.mjs`]) {
+  for (const f of [
+    `${refs.root}/dist/index.js`,
+    `${refs.root}/dist/antigravity/index.js`,
+    `${refs.root}/src/tui/entry.mjs`,
+  ]) {
     if (!existsSync(f)) throw new Error(`Local package entrypoint missing: ${f}. Run 'npm run build' first.`);
   }
 
   const file = options.configPath || findOpenCodeConfigFile();
-  const original = existsSync(file) ? readFileSync(file, "utf8") : "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n";
+  const original = existsSync(file)
+    ? readFileSync(file, "utf8")
+    : '{\n  "$schema": "https://opencode.ai/config.json"\n}\n';
   const updated = applyUniversalConfigUpdates(original, options);
   const serverChanged = updated !== original;
 
   // When an explicit server config is supplied, its TUI lives beside it — never default to the live global.
-  const tuiFile = options.tuiConfigPath || (options.configPath ? join(dirname(options.configPath), "tui.json") : findTuiConfigFile());
+  const tuiFile =
+    options.tuiConfigPath || (options.configPath ? join(dirname(options.configPath), "tui.json") : findTuiConfigFile());
   const originalTui = existsSync(tuiFile) ? readFileSync(tuiFile, "utf8") : "{}";
   const parsedTui = parseStrict(originalTui);
-  const owned = ownedNames(refs).filter(o => o === refs.tui || o === PLUGIN_ID || PLUGIN_ALIASES.includes(o));
+  const owned = ownedNames(refs).filter((o) => o === refs.tui || o === PLUGIN_ID || PLUGIN_ALIASES.includes(o));
   let tuiPlugins = Array.isArray(parsedTui.plugin) ? [...parsedTui.plugin] : [];
-  tuiPlugins = tuiPlugins.filter(p => !matchesOwned(pluginName(p), owned));
+  tuiPlugins = tuiPlugins.filter((p) => !matchesOwned(pluginName(p), owned));
   if (!tuiPlugins.includes(refs.tui)) tuiPlugins.unshift(refs.tui);
   const updatedTui = applyEdits(originalTui, modify(originalTui, ["plugin"], tuiPlugins, FMT));
   const tuiChanged = updatedTui !== originalTui || !existsSync(tuiFile);

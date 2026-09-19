@@ -1,14 +1,18 @@
-import { createSignal, onMount, onCleanup, For, Show } from "solid-js";
-import { readFileSync, writeFileSync, existsSync, watch } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { parse, modify, applyEdits } from "jsonc-parser";
+import { join } from "node:path";
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import { loadConfig } from "../manager/store.js";
-import { getOpenCodeConfigDir } from "../shared/paths.js";
+import { applyEdits, modify, parse } from "jsonc-parser";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { usageTracker } from "../chatgpt-web/usage-tracker.js";
-import { zenUsageTracker, type ZenPacingResult } from "../opencode-zen/usage-tracker.js";
-import { getAntigravityAccounts, getAntigravityActiveFamilies, isOpencodeConfigured } from "../manager/provider-accounts.js";
+import {
+  getAntigravityAccounts,
+  getAntigravityActiveFamilies,
+  isOpencodeConfigured,
+} from "../manager/provider-accounts.js";
+import { loadConfig } from "../manager/store.js";
+import { type ZenPacingResult, zenUsageTracker } from "../opencode-zen/usage-tracker.js";
+import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { openRoutingSelector } from "./dialogs.js";
 
 type Api = TuiPluginApi;
@@ -90,7 +94,7 @@ export function savePreference(key: string, collapsed: boolean, configDir = getO
   savePromise = savePromise.then(async () => {
     const file = getTuiPreferencesFile(configDir);
     try {
-      let text = existsSync(file) ? readFileSync(file, "utf8") : "{\n}\n";
+      const text = existsSync(file) ? readFileSync(file, "utf8") : "{\n}\n";
       const edits = modify(text, [key, "collapsed"], collapsed, {
         formattingOptions: { insertSpaces: true, tabSize: 2 },
       });
@@ -192,7 +196,7 @@ interface PacingResult {
 function computePacing(
   window: { usedPercent: number; resetsAt?: string } | undefined,
   windowMs: number,
-  now: number
+  now: number,
 ): PacingResult | null {
   if (!window?.resetsAt) return null;
   const resetsAt = new Date(window.resetsAt).getTime();
@@ -227,19 +231,22 @@ function quotaBarSegments(usedPct: number, width = 10, pacing?: PacingResult | n
     { text: BAR_FILLED_CHAR.repeat(usedCells), tone: fillTone },
     { text: BAR_EMPTY_CHAR.repeat(width - usedCells), tone: fillTone },
   ];
-  if (!pacing) return plain.filter(s => s.text.length > 0);
+  if (!pacing) return plain.filter((s) => s.text.length > 0);
 
   const paceCells = cells(pacing.pacePercent);
   const lo = Math.min(usedCells, paceCells);
   const hi = Math.max(usedCells, paceCells);
-  if (hi === lo) return plain.filter(s => s.text.length > 0);
+  if (hi === lo) return plain.filter((s) => s.text.length > 0);
 
   const overspent = usedCells > paceCells;
   return [
     { text: BAR_FILLED_CHAR.repeat(lo), tone: fillTone },
-    { text: (overspent ? PACE_DEFICIT_CHAR : PACE_RESERVE_CHAR).repeat(hi - lo), tone: (overspent ? "err" : "ok") as BarSegment["tone"] },
+    {
+      text: (overspent ? PACE_DEFICIT_CHAR : PACE_RESERVE_CHAR).repeat(hi - lo),
+      tone: (overspent ? "err" : "ok") as BarSegment["tone"],
+    },
     { text: BAR_EMPTY_CHAR.repeat(width - hi), tone: fillTone },
-  ].filter(s => s.text.length > 0);
+  ].filter((s) => s.text.length > 0);
 }
 
 function toneColor(theme: any, tone: string): string {
@@ -254,7 +261,6 @@ function toneColor(theme: any, tone: string): string {
       return theme?.textMuted ?? "#888888";
     case "accent":
       return theme?.accent ?? "#a855f7";
-    case "text":
     default:
       return theme?.text ?? "#ffffff";
   }
@@ -359,10 +365,10 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   const activeOaId =
     sessionId && oaState?.activeRouting?.[sessionId]?.activeId
       ? oaState.activeRouting[sessionId].activeId
-      : oaState?.activeId ?? "main";
+      : (oaState?.activeId ?? "main");
 
   const mainQuota = oaState?.main?.quota;
-  const mainAlias = cfg.accounts.find(a => a.kind === "openai" && a.main)?.alias;
+  const mainAlias = cfg.accounts.find((a) => a.kind === "openai" && a.main)?.alias;
 
   if (mainQuota) {
     const windows: OpenAiDisplayWindow[] = [];
@@ -407,7 +413,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   if (Array.isArray(oaState?.fallbacks)) {
     for (const fb of oaState.fallbacks) {
       if (fb.enabled === false) continue;
-      const fbAlias = cfg.accounts.find(a => a.id === fb.id || a.label === fb.label)?.alias;
+      const fbAlias = cfg.accounts.find((a) => a.id === fb.id || a.label === fb.label)?.alias;
       const fbQuota = fb.quota;
       const windows: OpenAiDisplayWindow[] = [];
       if (fbQuota?.primary) {
@@ -437,7 +443,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   } else if (Array.isArray(oaAuth?.accounts)) {
     for (const fb of oaAuth.accounts) {
       if (fb.enabled === false) continue;
-      const fbAlias = cfg.accounts.find(a => a.id === fb.id || a.label === fb.label)?.alias;
+      const fbAlias = cfg.accounts.find((a) => a.id === fb.id || a.label === fb.label)?.alias;
       oaAccounts.push({
         id: fb.id,
         name: fbAlias || fb.label || fb.id,
@@ -452,7 +458,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   }
 
   // 2. CHATGPT WEB (only if account exists)
-  const webAcct = cfg.accounts.find(a => a.kind === "chatgpt-web");
+  const webAcct = cfg.accounts.find((a) => a.kind === "chatgpt-web");
   const webStatus = usageTracker.getStatus();
   const chatgptWeb = {
     exists: Boolean(webAcct),
@@ -481,11 +487,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   // sidebar state) and a label -> manager-account map to resolve aliases.
   const realAnti = getAntigravityAccounts(configDir);
   const activeFamilies = getAntigravityActiveFamilies(configDir);
-  const antiByLabel = new Map(
-    cfg.accounts
-      .filter(x => x.kind === "antigravity")
-      .map(x => [x.label, x])
-  );
+  const antiByLabel = new Map(cfg.accounts.filter((x) => x.kind === "antigravity").map((x) => [x.label, x]));
   if (Array.isArray(agState?.accounts) && agState.accounts.length > 0) {
     for (const a of agState.accounts) {
       if (a.enabled === false) continue;
@@ -531,10 +533,9 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
       // Which family(ies) this account is the active one for, from the real
       // store's per-family active indices (index-aligned with the sidebar).
       const numIdx = idx !== undefined ? Number(idx) : -1;
-      const activeFor = [
-        activeFamilies.gemini === numIdx ? "gem" : null,
-        activeFamilies.claude === numIdx ? "o" : null,
-      ].filter((f): f is string => Boolean(f)).join(", ");
+      const activeFor = [activeFamilies.gemini === numIdx ? "gem" : null, activeFamilies.claude === numIdx ? "o" : null]
+        .filter((f): f is string => Boolean(f))
+        .join(", ");
 
       const isActive = Boolean(activeFor);
 
@@ -561,9 +562,10 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
 
   const zenConfigured = isOpencodeConfigured(configDir);
   const zenStatus = zenUsageTracker.getStatus(zenConfigured, "big-pickle");
-  const unifiedRoutingMode = (cfg.router?.routing?.mode && cfg.router.routing.mode !== "main-first")
-    ? cfg.router.routing.mode
-    : (cfg.router?.routingMode ?? cfg.router?.zenRoutingMode ?? cfg.router?.routing?.mode ?? "main-first");
+  const unifiedRoutingMode =
+    cfg.router?.routing?.mode && cfg.router.routing.mode !== "main-first"
+      ? cfg.router.routing.mode
+      : (cfg.router?.routingMode ?? cfg.router?.zenRoutingMode ?? cfg.router?.routing?.mode ?? "main-first");
 
   const opencodeZen: OpenCodeZenDisplayData = {
     isConfigured: zenConfigured,
@@ -608,12 +610,16 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   };
 }
 
-function getOpenAiSummary(data: UnifiedSidebarData): { name: string; text: string; tone: "ok" | "warn" | "err" | "muted" } {
-  const active = data.openai.accounts.find(a => a.active) ?? data.openai.accounts[0];
+function getOpenAiSummary(data: UnifiedSidebarData): {
+  name: string;
+  text: string;
+  tone: "ok" | "warn" | "err" | "muted";
+} {
+  const active = data.openai.accounts.find((a) => a.active) ?? data.openai.accounts[0];
   if (!active) return { name: "main", text: "\u2014", tone: "muted" };
 
-  const w5h = active.windows.find(w => w.label === "5h");
-  const w7d = active.windows.find(w => w.label === "7d");
+  const w5h = active.windows.find((w) => w.label === "5h");
+  const w7d = active.windows.find((w) => w.label === "7d");
 
   let text = "";
   if (w5h && w7d) {
@@ -626,13 +632,17 @@ function getOpenAiSummary(data: UnifiedSidebarData): { name: string; text: strin
     text = "ready";
   }
 
-  const maxPct = Math.max(...active.windows.map(w => w.usedPct), 0);
+  const maxPct = Math.max(...active.windows.map((w) => w.usedPct), 0);
   const tone = maxPct >= 80 ? "err" : maxPct >= 50 ? "warn" : "ok";
   return { name: active.name, text, tone };
 }
 
-function getAntigravitySummary(data: UnifiedSidebarData): { name: string; text: string; tone: "ok" | "warn" | "err" | "muted" } {
-  const active = data.antigravity.accounts.find(a => a.active) ?? data.antigravity.accounts[0];
+function getAntigravitySummary(data: UnifiedSidebarData): {
+  name: string;
+  text: string;
+  tone: "ok" | "warn" | "err" | "muted";
+} {
+  const active = data.antigravity.accounts.find((a) => a.active) ?? data.antigravity.accounts[0];
   if (!active) return { name: "Account 1", text: "\u2014", tone: "muted" };
 
   const parts: string[] = [];
@@ -640,7 +650,7 @@ function getAntigravitySummary(data: UnifiedSidebarData): { name: string; text: 
   for (const fam of active.families) {
     const worst = fam.pools.reduce<AntigravityDisplayPool | null>(
       (best, p) => (best === null || p.usedPct > best.usedPct ? p : best),
-      null
+      null,
     );
     if (worst) {
       parts.push(`${fam.name}: ${Math.round(worst.usedPct)}%`);
@@ -653,7 +663,11 @@ function getAntigravitySummary(data: UnifiedSidebarData): { name: string; text: 
   return { name: active.label, text, tone };
 }
 
-function getZenSummary(data: UnifiedSidebarData): { name: string; text: string; tone: "ok" | "warn" | "err" | "muted" } {
+function getZenSummary(data: UnifiedSidebarData): {
+  name: string;
+  text: string;
+  tone: "ok" | "warn" | "err" | "muted";
+} {
   const zen = data.opencodeZen;
   if (!zen.isConfigured) return { name: "OpenCode Zen", text: "offline", tone: "muted" };
   const text = `${Math.round(zen.usedPct)}% (${formatTokenCount(zen.totalTokens24h)})`;
@@ -667,9 +681,7 @@ function getZenSummary(data: UnifiedSidebarData): { name: string; text: string; 
  * styling, boxes, pacing bars, tags, and routing, with interactive collapse/expand.
  */
 export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
-  const [data, setData] = createSignal<UnifiedSidebarData>(
-    gatherSidebarData(undefined, props.sessionId)
-  );
+  const [data, setData] = createSignal<UnifiedSidebarData>(gatherSidebarData(undefined, props.sessionId));
 
   onMount(() => {
     const timer = setInterval(() => {
@@ -812,7 +824,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                   </box>
 
                   <For each={acct.windows}>
-                    {w => {
+                    {(w) => {
                       const segments = quotaBarSegments(w.usedPct, 10, w.pacing);
                       const usageTone = w.usedPct >= 80 ? "err" : w.usedPct >= 50 ? "warn" : "ok";
                       const paceLine = () => {
@@ -829,16 +841,10 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                         <box width="100%" flexDirection="column">
                           <box width="100%" flexDirection="row" justifyContent="space-between">
                             <box flexDirection="row" alignItems="center">
-                              <text fg={theme().textMuted ?? "#888888"}>
-                                {w.label.padEnd(3)}
-                              </text>
+                              <text fg={theme().textMuted ?? "#888888"}>{w.label.padEnd(3)}</text>
                               <box width={10} flexShrink={0} flexDirection="row">
                                 <For each={segments}>
-                                  {seg => (
-                                    <text fg={toneColor(theme(), seg.tone)}>
-                                      {seg.text}
-                                    </text>
-                                  )}
+                                  {(seg) => <text fg={toneColor(theme(), seg.tone)}>{seg.text}</text>}
                                 </For>
                               </box>
                               <text fg={toneColor(theme(), usageTone)}>
@@ -908,13 +914,19 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
               justifyContent="space-between"
               alignItems="center"
               marginTop={1}
-              onMouseUp={(e: any) => { e.stopPropagation(); e.preventDefault(); openRoutingSelector(props.api, "openai"); }}
+              onMouseUp={(e: any) => {
+                e.stopPropagation();
+                e.preventDefault();
+                openRoutingSelector(props.api, "openai");
+              }}
             >
               <text fg={theme().text ?? "#ffffff"}>
                 <b>{"Routing"}</b>
               </text>
               <text fg="#10a37f">
-                <b>{formatRoutingDisplay(data().openai.routingMode)} {"\u25be"}</b>
+                <b>
+                  {formatRoutingDisplay(data().openai.routingMode)} {"\u25be"}
+                </b>
               </text>
             </box>
           </Show>
@@ -984,7 +996,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                   <For each={acct.families}>
                     {(fam) => (
                       <For each={fam.pools}>
-                        {p => {
+                        {(p) => {
                           const segments = quotaBarSegments(p.usedPct, 10);
                           const poolTone = p.usedPct >= 80 ? "err" : p.usedPct >= 50 ? "warn" : "ok";
                           return (
@@ -997,11 +1009,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                                   {` ${p.label.padEnd(3)}`}
                                 </text>
                                 <For each={segments}>
-                                  {seg => (
-                                    <text fg={toneColor(theme(), seg.tone)}>
-                                      {seg.text}
-                                    </text>
-                                  )}
+                                  {(seg) => <text fg={toneColor(theme(), seg.tone)}>{seg.text}</text>}
                                 </For>
                                 <text fg={toneColor(theme(), poolTone)}>
                                   {` ${String(Math.round(p.usedPct)).padStart(3)}%`}
@@ -1031,13 +1039,19 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
               justifyContent="space-between"
               alignItems="center"
               marginTop={1}
-              onMouseUp={(e: any) => { e.stopPropagation(); e.preventDefault(); openRoutingSelector(props.api, "google"); }}
+              onMouseUp={(e: any) => {
+                e.stopPropagation();
+                e.preventDefault();
+                openRoutingSelector(props.api, "google");
+              }}
             >
               <text fg={theme().text ?? "#ffffff"}>
                 <b>{"Routing"}</b>
               </text>
               <text fg="#4285F4">
-                <b>{formatRoutingDisplay(data().antigravity.routingMode)} {"\u25be"}</b>
+                <b>
+                  {formatRoutingDisplay(data().antigravity.routingMode)} {"\u25be"}
+                </b>
               </text>
             </box>
           </Show>
@@ -1097,13 +1111,20 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                   <b>{data().opencodeZen.model}</b>
                 </text>
                 <text fg={toneColor(theme(), data().opencodeZen.isConfigured ? "ok" : "muted")}>
-                  <b>{data().opencodeZen.isConfigured ? (data().opencodeZen.isRateLimited ? "limited" : "active") : "offline"}</b>
+                  <b>
+                    {data().opencodeZen.isConfigured
+                      ? data().opencodeZen.isRateLimited
+                        ? "limited"
+                        : "active"
+                      : "offline"}
+                  </b>
                 </text>
               </box>
 
               {(() => {
                 const segments = quotaBarSegments(data().opencodeZen.usedPct, 10, data().opencodeZen.pacing);
-                const usageTone = data().opencodeZen.usedPct >= 80 ? "err" : data().opencodeZen.usedPct >= 50 ? "warn" : "ok";
+                const usageTone =
+                  data().opencodeZen.usedPct >= 80 ? "err" : data().opencodeZen.usedPct >= 50 ? "warn" : "ok";
                 const paceLine = () => {
                   const p = data().opencodeZen.pacing;
                   if (!p || p.state === "on-pace") return null;
@@ -1121,11 +1142,7 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                         <text fg={theme().textMuted ?? "#888888"}>{"24h "}</text>
                         <box width={10} flexShrink={0} flexDirection="row">
                           <For each={segments}>
-                            {seg => (
-                              <text fg={toneColor(theme(), seg.tone)}>
-                                {seg.text}
-                              </text>
-                            )}
+                            {(seg) => <text fg={toneColor(theme(), seg.tone)}>{seg.text}</text>}
                           </For>
                         </box>
                         <text fg={toneColor(theme(), usageTone)}>
@@ -1140,7 +1157,9 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                     <Show when={paceLine()}>
                       <box width="100%" flexDirection="row">
                         <text fg={theme().textMuted ?? "#888888"}>{"    "}</text>
-                        <text fg={toneColor(theme(), data().opencodeZen.pacing?.state === "deficit" ? "warn" : "muted")}>
+                        <text
+                          fg={toneColor(theme(), data().opencodeZen.pacing?.state === "deficit" ? "warn" : "muted")}
+                        >
                           {paceLine()}
                         </text>
                       </box>
@@ -1164,13 +1183,19 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
               justifyContent="space-between"
               alignItems="center"
               marginTop={1}
-              onMouseUp={(e: any) => { e.stopPropagation(); e.preventDefault(); openRoutingSelector(props.api, "opencode"); }}
+              onMouseUp={(e: any) => {
+                e.stopPropagation();
+                e.preventDefault();
+                openRoutingSelector(props.api, "opencode");
+              }}
             >
               <text fg={theme().text ?? "#ffffff"}>
                 <b>{"Routing"}</b>
               </text>
               <text fg="#f97316">
-                <b>{formatRoutingDisplay(data().opencodeZen.routingMode)} {"\u25be"}</b>
+                <b>
+                  {formatRoutingDisplay(data().opencodeZen.routingMode)} {"\u25be"}
+                </b>
               </text>
             </box>
           </Show>

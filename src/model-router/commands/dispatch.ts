@@ -1,35 +1,32 @@
 import { existsSync } from "node:fs";
+import type { Catalog } from "../router/catalog.js";
+import { findOrphanedStrongPatterns, validateModels } from "../router/catalog.js";
+import type { RouterConfig } from "../router/config.js";
 import {
+  findProjectOverride,
+  invalidateConfigCache,
   loadConfig,
+  localOverridePath,
+  overridePath,
   resolvePresetName,
   writeState,
-  invalidateConfigCache,
-  overridePath,
-  localOverridePath,
-  findProjectOverride,
 } from "../router/config.js";
-import type { RouterConfig } from "../router/config.js";
 import { resolveEnforcementMode } from "../router/enforcement.js";
 import {
-  findOrphanedStrongPatterns,
-  validateModels,
-} from "../router/catalog.js";
-import type { Catalog } from "../router/catalog.js";
-import {
-  buildTiersOutput,
-  buildPresetList,
-  buildPresetSwitched,
-  buildUnknownPreset,
-  buildNoModes,
   buildBudgetList,
   buildBudgetSwitched,
-  buildUnknownMode,
   buildBypassMessage,
   buildEnforceSet,
   buildEnforceStatus,
-  buildOverridesOutput,
-  buildRouterHelp,
   buildModelsOutput,
+  buildNoModes,
+  buildOverridesOutput,
+  buildPresetList,
+  buildPresetSwitched,
+  buildRouterHelp,
+  buildTiersOutput,
+  buildUnknownMode,
+  buildUnknownPreset,
   formatModelIssues,
 } from "./output.js";
 
@@ -79,9 +76,7 @@ export function buildRouterOutput(cfg: RouterConfig, args: string, env: NodeJS.P
       saveEnforcementMode(mode);
       return buildEnforceSet(mode);
     }
-    return buildEnforceStatus(
-      resolveEnforcementMode({ config: cfg, env }).mode,
-    );
+    return buildEnforceStatus(resolveEnforcementMode({ config: cfg, env }).mode);
   }
 
   if (sub === "overrides") {
@@ -98,9 +93,7 @@ export function buildRouterOutput(cfg: RouterConfig, args: string, env: NodeJS.P
     });
   }
 
-  return buildRouterHelp(
-    resolveEnforcementMode({ config: cfg, env }).mode,
-  );
+  return buildRouterHelp(resolveEnforcementMode({ config: cfg, env }).mode);
 }
 
 /** `/budget` dispatch. Persists the switch, then renders. */
@@ -203,7 +196,7 @@ export async function dispatchRouterCommand(
       if (catalog) {
         const issues = validateModels(cfg, catalog);
         if (issues.length > 0) {
-          text += "\n\n" + formatModelIssues(issues);
+          text += `\n\n${formatModelIssues(issues)}`;
         }
       }
     }

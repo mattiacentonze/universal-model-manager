@@ -1,12 +1,12 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import { loadConfig, saveConfig } from "../manager/store.js";
+import { logger } from "../shared/logger.js";
+import { getOpenCodeConfigDir, getUniversalAuthDataDir } from "../shared/paths.js";
 import { BridgeServer } from "./bridge-server.js";
 import { BrowserManager } from "./browser-manager.js";
 import { ChatGptRunner } from "./chatgpt-runner.js";
-import { SessionStore } from "./session-store.js";
 import { importFromChromeProfile, listChromeProfiles } from "./chrome-importer.js";
-import { logger } from "../shared/logger.js";
-import { loadConfig, saveConfig } from "../manager/store.js";
-import { getOpenCodeConfigDir, getUniversalAuthDataDir } from "../shared/paths.js";
+import { SessionStore } from "./session-store.js";
 
 let activeServer: BridgeServer | null = null;
 
@@ -16,7 +16,7 @@ function registerChatGptWebAccount(sessionStore: SessionStore): void {
   const dir = getUniversalAuthDataDir();
   const configDir = getOpenCodeConfigDir();
   const cfg = loadConfig(dir, configDir);
-  const existing = cfg.accounts.find(a => a.kind === "chatgpt-web");
+  const existing = cfg.accounts.find((a) => a.kind === "chatgpt-web");
   if (existing) {
     existing.alias = alias;
     existing.configured = true;
@@ -63,7 +63,7 @@ async function isDaemonUp(port: number): Promise<boolean> {
   }
 }
 
-export const chatgptWebServerPlugin: Plugin = async (input, options) => {
+export const chatgptWebServerPlugin: Plugin = async (_input, options) => {
   const port = typeof options?.port === "number" ? options.port : 17842;
   const sessionStore = new SessionStore();
 
@@ -106,7 +106,7 @@ export const chatgptWebServerPlugin: Plugin = async (input, options) => {
         const accountLabel = info?.name ? ` (Account: ${info.name})` : "";
         output.parts.push({
           type: "text",
-          text: `[Universal Auth] ChatGPT Web Status:\n- Session logged in: ${hasSession ? "YES" + accountLabel : "NO"}\n- Bridge endpoint: http://127.0.0.1:${port}/v1\n- Models: chatgpt-web/auto, chatgpt-web/pro, chatgpt-web/think, chatgpt-web/luna`,
+          text: `[Universal Auth] ChatGPT Web Status:\n- Session logged in: ${hasSession ? `YES${accountLabel}` : "NO"}\n- Bridge endpoint: http://127.0.0.1:${port}/v1\n- Models: chatgpt-web/auto, chatgpt-web/pro, chatgpt-web/think, chatgpt-web/luna`,
         } as any);
         return;
       }
@@ -117,15 +117,13 @@ export const chatgptWebServerPlugin: Plugin = async (input, options) => {
         let msg = "[Universal Auth] Available Google Chrome Profiles:\n";
         profiles.forEach((p, i) => {
           const isCurrent = Boolean(
-            currentInfo?.name && (
-              currentInfo.name.includes(p.email || "___") ||
-              currentInfo.name.includes(p.folder)
-            )
+            currentInfo?.name && (currentInfo.name.includes(p.email || "___") || currentInfo.name.includes(p.folder)),
           );
           const status = p.hasSession ? "ChatGPT ACTIVE" : "No ChatGPT session";
           msg += `  ${i + 1}. [${p.folder}] ${p.name} (${p.email || "no email"}) — ${status}${isCurrent ? " <- ACTIVE" : ""}\n`;
         });
-        msg += "\nTo connect an account, run:\n  /universal-chatgpt-web login <number or name>\n  Example: /universal-chatgpt-web login 1  OR  /universal-chatgpt-web login iit";
+        msg +=
+          "\nTo connect an account, run:\n  /universal-chatgpt-web login <number or name>\n  Example: /universal-chatgpt-web login 1  OR  /universal-chatgpt-web login iit";
         output.parts.push({ type: "text", text: msg } as any);
         return;
       }
@@ -137,7 +135,7 @@ export const chatgptWebServerPlugin: Plugin = async (input, options) => {
         if (target) {
           let targetFolder = target;
           const idx = parseInt(target, 10);
-          if (!isNaN(idx) && idx >= 1 && idx <= profiles.length) {
+          if (!Number.isNaN(idx) && idx >= 1 && idx <= profiles.length) {
             targetFolder = profiles[idx - 1].folder;
           }
 
@@ -159,7 +157,7 @@ export const chatgptWebServerPlugin: Plugin = async (input, options) => {
         }
 
         // No argument: check if multiple profiles have ChatGPT sessions
-        const withSessions = profiles.filter(p => p.hasSession);
+        const withSessions = profiles.filter((p) => p.hasSession);
         if (withSessions.length > 1) {
           let msg = `[Universal Auth] Multiple Chrome profiles with active ChatGPT sessions detected:\n`;
           profiles.forEach((p, i) => {

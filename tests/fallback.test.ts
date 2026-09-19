@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dedupeChain, managerFallbackChain, fallbackPlugin } from "../src/fallback/index.js";
 import fallbackEngine from "../src/fallback/engine.js";
+import { dedupeChain, fallbackPlugin, managerFallbackChain } from "../src/fallback/index.js";
 import { emptyConfig, saveConfig } from "../src/manager/store.js";
 
 function fakeDataDir(): string {
@@ -75,10 +75,7 @@ describe("fallbackPlugin config hook", () => {
     isolateEnv(dataDir, cfgDir);
     saveConfig(emptyConfig(), dataDir);
 
-    const hooks = await fallbackPlugin(
-      { directory: cfgDir, client: { session: {}, tui: {} } } as any,
-      {} as any,
-    );
+    const hooks = await fallbackPlugin({ directory: cfgDir, client: { session: {}, tui: {} } } as any, {} as any);
     const opencodeCfg: any = {
       agent: {
         // Has an explicit chain -> left untouched.
@@ -87,7 +84,7 @@ describe("fallbackPlugin config hook", () => {
         plan: { model: "google/antigravity-gemini-3.8-flash" },
       },
     };
-    await hooks.config!(opencodeCfg);
+    await hooks.config?.(opencodeCfg);
     expect(opencodeCfg.agent.build.fallback_models).toEqual(["opencode/big-pickle"]);
     expect(opencodeCfg.agent.plan.fallback_models).toEqual(managerFallbackChain());
   });
@@ -118,13 +115,13 @@ describe("fallbackPlugin runtime fallback on Antigravity quota error", () => {
     };
     const hooks = await fallbackPlugin(ctx, {} as any);
     // Chain-less agent: the config hook must inject the manager chain.
-    await hooks.config!({
+    await hooks.config?.({
       agent: {
         plan: { model: "google/antigravity-gemini-3.8-flash" },
       },
     });
 
-    await hooks.event!({
+    await hooks.event?.({
       event: {
         type: "session.error",
         properties: {
@@ -133,8 +130,7 @@ describe("fallbackPlugin runtime fallback on Antigravity quota error", () => {
           model: "google/antigravity-gemini-3.8-flash",
           error: {
             name: "Error",
-            message:
-              "Quota protection: All 2 account(s) are over 80% usage for gemini. Quota resets in 00:12:34",
+            message: "Quota protection: All 2 account(s) are over 80% usage for gemini. Quota resets in 00:12:34",
           },
         },
       },
@@ -171,20 +167,16 @@ describe("fallbackPlugin runtime fallback on Antigravity quota error", () => {
     const hooks = await fallbackPlugin(ctx, {} as any);
     // build is configured with primary DeepSeek but the user switched to Google;
     // its explicit chain is Google -> Astra -> big-pickle.
-    await hooks.config!({
+    await hooks.config?.({
       agent: {
         build: {
           model: "iit/deepseek-v4-flash",
-          fallback_models: [
-            "google/antigravity-gemini-3.8-flash",
-            "openai/gpt-6-astra",
-            "opencode/big-pickle",
-          ],
+          fallback_models: ["google/antigravity-gemini-3.8-flash", "openai/gpt-6-astra", "opencode/big-pickle"],
         },
       },
     });
 
-    await hooks.event!({
+    await hooks.event?.({
       event: {
         type: "session.error",
         properties: {
@@ -193,8 +185,7 @@ describe("fallbackPlugin runtime fallback on Antigravity quota error", () => {
           model: "google/antigravity-gemini-3.8-flash",
           error: {
             name: "Error",
-            message:
-              "Quota protection: All 2 account(s) are over 80% usage for gemini. Quota resets in 00:12:34",
+            message: "Quota protection: All 2 account(s) are over 80% usage for gemini. Quota resets in 00:12:34",
           },
         },
       },
@@ -232,7 +223,7 @@ describe("fallback engine wrap-around", () => {
       cooldown_seconds: 0,
       fallback_models: ["openai/gpt-6-astra", "google/antigravity-gemini-3.8-flash"],
     } as any);
-    await hooks.config!({
+    await hooks.config?.({
       agent: {
         build: {
           model: "openai/gpt-6-astra",
@@ -241,31 +232,35 @@ describe("fallback engine wrap-around", () => {
       },
     });
 
-    const err = (model: string) => ({
-      event: {
-        type: "session.error",
-        properties: {
-          sessionID: "ses-wrap",
-          agent: "build",
-          model,
-          error: { name: "Error", message: "Quota protection: All accounts over 80% usage" },
+    const err = (model: string) =>
+      ({
+        event: {
+          type: "session.error",
+          properties: {
+            sessionID: "ses-wrap",
+            agent: "build",
+            model,
+            error: { name: "Error", message: "Quota protection: All accounts over 80% usage" },
+          },
         },
-      },
-    } as any);
+      }) as any;
 
     // Primary exhausts -> first fallback.
-    await hooks.event!(err("openai/gpt-6-astra"));
+    await hooks.event?.(err("openai/gpt-6-astra"));
     expect(replayed.length).toBe(1);
     expect(replayed[0].providerID).toBe("google");
 
     // Simulate the fallback completing (first token + idle clears awaiting state).
-    await hooks.event!({
-      event: { type: "message.part.delta", properties: { sessionID: "ses-wrap", info: { model: "google/antigravity-gemini-3.8-flash" } } },
+    await hooks.event?.({
+      event: {
+        type: "message.part.delta",
+        properties: { sessionID: "ses-wrap", info: { model: "google/antigravity-gemini-3.8-flash" } },
+      },
     } as any);
-    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "ses-wrap" } } } as any);
+    await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: "ses-wrap" } } } as any);
 
     // First fallback exhausts -> wrap around and retry the primary.
-    await hooks.event!(err("google/antigravity-gemini-3.8-flash"));
+    await hooks.event?.(err("google/antigravity-gemini-3.8-flash"));
     expect(replayed.length).toBe(2);
     expect(replayed[1].providerID).toBe("openai");
   });
@@ -307,10 +302,10 @@ describe("fallback engine routing modes", () => {
   }
 
   async function complete(hooks: any, model: string) {
-    await hooks.event!({
+    await hooks.event?.({
       event: { type: "message.part.delta", properties: { sessionID: "ses-mode", info: { model } } },
     } as any);
-    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "ses-mode" } } } as any);
+    await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: "ses-mode" } } } as any);
   }
 
   async function boot(replayed: any[], routingMode: string) {
@@ -320,7 +315,7 @@ describe("fallback engine routing modes", () => {
       fallback_models: CHAIN,
       max_fallback_attempts: 5,
     } as any);
-    await hooks.config!({
+    await hooks.config?.({
       agent: { build: { model: CHAIN[0], fallback_models: CHAIN } },
     });
     return hooks;
@@ -330,18 +325,18 @@ describe("fallback engine routing modes", () => {
     const replayed: any[] = [];
     const hooks = await boot(replayed, "sticky");
 
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed.length).toBe(1);
     expect(replayed[0].providerID).toBe("google");
     await complete(hooks, CHAIN[1]);
 
-    await hooks.event!(err(CHAIN[1]));
+    await hooks.event?.(err(CHAIN[1]));
     expect(replayed.length).toBe(2);
     expect(replayed[1].providerID).toBe("opencode");
     await complete(hooks, CHAIN[2]);
 
     // Last fallback exhausts: sticky does not wrap back to the primary.
-    await hooks.event!(err(CHAIN[2]));
+    await hooks.event?.(err(CHAIN[2]));
     expect(replayed.length).toBe(2);
   });
 
@@ -349,16 +344,16 @@ describe("fallback engine routing modes", () => {
     const replayed: any[] = [];
     const hooks = await boot(replayed, "fallback-first");
 
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed[0].providerID).toBe("google");
     await complete(hooks, CHAIN[1]);
 
-    await hooks.event!(err(CHAIN[1]));
+    await hooks.event?.(err(CHAIN[1]));
     expect(replayed[1].providerID).toBe("opencode");
     await complete(hooks, CHAIN[2]);
 
     // Wrap: fallback-first retries a secondary (gemini), not the primary.
-    await hooks.event!(err(CHAIN[2]));
+    await hooks.event?.(err(CHAIN[2]));
     expect(replayed.length).toBe(3);
     expect(replayed[2].providerID).toBe("google");
   });
@@ -367,16 +362,16 @@ describe("fallback engine routing modes", () => {
     const replayed: any[] = [];
     const hooks = await boot(replayed, "round-robin");
 
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed[0].providerID).toBe("google");
     await complete(hooks, CHAIN[1]);
 
-    await hooks.event!(err(CHAIN[1]));
+    await hooks.event?.(err(CHAIN[1]));
     expect(replayed[1].providerID).toBe("opencode");
     await complete(hooks, CHAIN[2]);
 
     // Wrap: round-robin cycles back to the primary.
-    await hooks.event!(err(CHAIN[2]));
+    await hooks.event?.(err(CHAIN[2]));
     expect(replayed.length).toBe(3);
     expect(replayed[2].providerID).toBe("openai");
   });
@@ -386,20 +381,20 @@ describe("fallback engine routing modes", () => {
     const hooks = await boot(replayed, "balanced");
 
     // Primary fails -> moves to gemini (index 1, never failed)
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed.length).toBe(1);
     expect(replayed[0].providerID).toBe("google");
     await complete(hooks, CHAIN[1]);
 
     // Gemini fails -> moves to big-pickle (index 2, never failed)
-    await hooks.event!(err(CHAIN[1]));
+    await hooks.event?.(err(CHAIN[1]));
     expect(replayed.length).toBe(2);
     expect(replayed[0].providerID).toBe("google");
     expect(replayed[1].providerID).toBe("opencode");
     await complete(hooks, CHAIN[2]);
 
     // Big-pickle fails -> both primary and gemini have failed; primary failed earlier so it is picked!
-    await hooks.event!(err(CHAIN[2]));
+    await hooks.event?.(err(CHAIN[2]));
     expect(replayed.length).toBe(3);
     expect(replayed[2].providerID).toBe("openai");
   });
@@ -409,13 +404,13 @@ describe("fallback engine routing modes", () => {
     const hooks = await boot(replayed, "load-balancing");
 
     // Primary fails -> moves to gemini
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed.length).toBe(1);
     expect(replayed[0].providerID).toBe("google");
     await complete(hooks, CHAIN[1]);
 
     // Gemini fails -> moves to big-pickle
-    await hooks.event!(err(CHAIN[1]));
+    await hooks.event?.(err(CHAIN[1]));
     expect(replayed.length).toBe(2);
     expect(replayed[1].providerID).toBe("opencode");
   });
@@ -431,7 +426,7 @@ describe("fallback engine routing modes", () => {
     const hooks = await boot(replayed, "latency-based");
 
     // Primary fails -> picks big-pickle (CHAIN[2]) because it has lower latency than gemini (CHAIN[1])
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed.length).toBe(1);
     expect(replayed[0].providerID).toBe("opencode");
   });
@@ -487,10 +482,10 @@ describe("fallback engine stay-on-fallback retry cap", () => {
   }
 
   async function complete(hooks: any, model: string) {
-    await hooks.event!({
+    await hooks.event?.({
       event: { type: "message.part.delta", properties: { sessionID: "ses-cap", info: { model } } },
     } as any);
-    await hooks.event!({ event: { type: "session.idle", properties: { sessionID: "ses-cap" } } } as any);
+    await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: "ses-cap" } } } as any);
   }
 
   it("advances to the next fallback after 5 consecutive retries on the same model", async () => {
@@ -500,28 +495,27 @@ describe("fallback engine stay-on-fallback retry cap", () => {
       routing_mode: "main-first",
       fallback_models: CHAIN,
     } as any);
-    await hooks.config!({
+    await hooks.config?.({
       agent: { build: { model: CHAIN[0], fallback_models: CHAIN } },
     });
 
     // Move onto the first fallback (gemini) via a hard error.
-    await hooks.event!(err(CHAIN[0]));
+    await hooks.event?.(err(CHAIN[0]));
     expect(replayed.length).toBe(1);
     expect(replayed[0].providerID).toBe("google");
     await complete(hooks, CHAIN[1]);
 
     // 4 retries stay on gemini (healthy fallback).
     for (let i = 0; i < 4; i++) {
-      await hooks.event!(retry(CHAIN[1]));
+      await hooks.event?.(retry(CHAIN[1]));
       console.log("after retry", i, "replayed.length =", replayed.length);
     }
     expect(replayed.length).toBe(5);
     expect(replayed[4].providerID).toBe("google");
 
     // 5th retry exceeds the cap -> gemini marked failed, advance to big-pickle.
-    await hooks.event!(retry(CHAIN[1]));
+    await hooks.event?.(retry(CHAIN[1]));
     expect(replayed.length).toBe(6);
     expect(replayed[5].providerID).toBe("opencode");
   });
 });
-

@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ZenUsageTracker } from "../src/opencode-zen/usage-tracker.js";
 import { opencodeZenServerPlugin } from "../src/opencode-zen/index.js";
+import { ZenUsageTracker } from "../src/opencode-zen/usage-tracker.js";
 
 describe("ZenUsageTracker", () => {
   it("initializes with empty state and default estimated limit", () => {
@@ -84,13 +84,13 @@ describe("ZenUsageTracker", () => {
   it("opencodeZenServerPlugin hooks into assistant message events and records token usage", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "zen-"));
     const file = join(tmp, "opencode-zen-usage.json");
-    const tracker = new ZenUsageTracker(file);
+    const _tracker = new ZenUsageTracker(file);
 
     const hooks = await opencodeZenServerPlugin({} as any, {});
     expect(hooks.event).toBeDefined();
 
     // Event for opencode model
-    await hooks.event!({
+    await hooks.event?.({
       event: {
         type: "message.updated",
         properties: {

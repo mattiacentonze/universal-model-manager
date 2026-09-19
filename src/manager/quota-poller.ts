@@ -1,12 +1,8 @@
 // Vendored cortexkit auth bundles expose their RPC dir + port-file helpers.
-// @ts-ignore
-import { getRpcDir as antigravityGetRpcDir } from "../../vendor/opencode-antigravity-auth/dist/src/rpc/rpc-dir.js";
-// @ts-ignore
 import { discoverPortFile as antigravityDiscoverPortFile } from "../../vendor/opencode-antigravity-auth/dist/src/rpc/port-file.js";
-// @ts-ignore
-import { getRpcDir as openaiGetRpcDir } from "../../vendor/opencode-openai-auth/dist/rpc/rpc-dir.js";
-// @ts-ignore
+import { getRpcDir as antigravityGetRpcDir } from "../../vendor/opencode-antigravity-auth/dist/src/rpc/rpc-dir.js";
 import { discoverPortFile as openaiDiscoverPortFile } from "../../vendor/opencode-openai-auth/dist/rpc/port-file.js";
+import { getRpcDir as openaiGetRpcDir } from "../../vendor/opencode-openai-auth/dist/rpc/rpc-dir.js";
 
 export type QuotaProvider = "antigravity" | "openai";
 
@@ -48,10 +44,7 @@ export function resolveRpcDir(provider: QuotaProvider, projectDir?: string): str
 }
 
 /** Locate a live RPC port file for a provider, optionally scoped to a project. */
-export async function findPortFile(
-  provider: QuotaProvider,
-  projectDir?: string,
-): Promise<PortFileEntry | null> {
+export async function findPortFile(provider: QuotaProvider, projectDir?: string): Promise<PortFileEntry | null> {
   const rpcDir = resolveRpcDir(provider, projectDir);
   try {
     return await PROVIDER_DISCOVER[provider](rpcDir);
@@ -61,10 +54,7 @@ export async function findPortFile(
 }
 
 /** Send an RPC `apply` refresh request to a provider's running server. */
-export async function refreshProviderQuota(
-  provider: QuotaProvider,
-  projectDir?: string,
-): Promise<boolean> {
+export async function refreshProviderQuota(provider: QuotaProvider, projectDir?: string): Promise<boolean> {
   const entry = await findPortFile(provider, projectDir);
   if (!entry) return false;
 
@@ -182,12 +172,8 @@ export function createQuotaPoller(projectDir?: string): QuotaPoller {
   api.eventHandler = async (input: { event: any }) => {
     const type = input?.event?.type;
     const statusType = input?.event?.properties?.status?.type;
-    const isStart =
-      type === "session.created" ||
-      (type === "session.status" && statusType === "busy");
-    const isComplete =
-      type === "session.idle" ||
-      (type === "session.status" && statusType === "idle");
+    const isStart = type === "session.created" || (type === "session.status" && statusType === "busy");
+    const isComplete = type === "session.idle" || (type === "session.status" && statusType === "idle");
     if (isStart) api.onTaskStart();
     else if (isComplete) api.onTaskComplete();
   };

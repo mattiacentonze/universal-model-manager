@@ -1,52 +1,41 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
-
+import { dispatchRouterCommand } from "./commands/dispatch.js";
+import { createDelegateTool } from "./delegate.js";
+import { guardAfterCall, guardBeforeCall } from "./guard/enforce.js";
+import { detectNarration } from "./guard/narration.js";
+import { scrubText } from "./guard/scrub.js";
+import { createGuardStore } from "./guard/store.js";
+import { buildAgentOptions, warnAgentOptionsEffortOnce } from "./router/agent-options.js";
+import type { Catalog } from "./router/catalog.js";
+import { findOrphanedStrongPatterns, validateModels } from "./router/catalog.js";
+import { fetchLiveCatalog } from "./router/catalog-client.js";
 // Imports for internal use within this module
 import { loadConfig } from "./router/config.js";
-import type { RouterConfig, TierConfig, Preset, ModeConfig, FallbackConfig, EnforcementConfig } from "./router/config.js";
-import { buildAgentOptions, warnAgentOptionsEffortOnce } from "./router/agent-options.js";
+import { resolveEnforcementMode } from "./router/enforcement.js";
+import { createIdleTtlSweeper } from "./router/idle-sweep.js";
+import { createPluginLogger } from "./router/logger.js";
 import { selectTierPrompt } from "./router/prompts.js";
 import {
-  resolveSubagentOverrides,
-  mergeSubagentOverride,
-} from "./router/subagents.js";
-import { detectNarration } from "./guard/narration.js";
-import {
+  assembleSystemPrompt,
+  CLAUDE_ANTI_NARRATION,
+  CLAUDE_TIER_PREFIX,
   getActiveTiers,
   isClaudeModel,
-  CLAUDE_TIER_PREFIX,
-  CLAUDE_ANTI_NARRATION,
-  assembleSystemPrompt,
 } from "./router/protocol.js";
-import { resolveEnforcementMode } from "./router/enforcement.js";
-import { createPluginLogger } from "./router/logger.js";
-import {
-  findOrphanedStrongPatterns,
-  validateModels,
-} from "./router/catalog.js";
-import type { Catalog } from "./router/catalog.js";
-import {
-  createSessionStore,
-  READ_ONLY_TOOLS,
-} from "./router/sessions.js";
 import type { Cap, SubagentState } from "./router/sessions.js";
+import { createSessionStore, READ_ONLY_TOOLS } from "./router/sessions.js";
+import { mergeSubagentOverride, resolveSubagentOverrides } from "./router/subagents.js";
+import { dumpSessionScorecards } from "./telemetry/scorecard-dump.js";
 import { createTrajectoryStore } from "./telemetry/trajectory.js";
-import { createGuardStore } from "./guard/store.js";
-import { createIdleTtlSweeper } from "./router/idle-sweep.js";
-import { guardBeforeCall, guardAfterCall } from "./guard/enforce.js";
-import { scrubText } from "./guard/scrub.js";
-import { accept } from "./verify/gate.js";
-import { createVerificationWiring } from "./verify/wiring.js";
 import {
+  buildDelegationDoD,
+  buildForcingNote,
   createChangedFileStore,
   parseTaskResult,
-  buildDelegationDoD,
   shouldVerifyTask,
-  buildForcingNote,
 } from "./verify/dispatch.js";
-import { createDelegateTool } from "./delegate.js";
-import { dispatchRouterCommand } from "./commands/dispatch.js";
-import { fetchLiveCatalog } from "./router/catalog-client.js";
-import { dumpSessionScorecards } from "./telemetry/scorecard-dump.js";
+import { accept } from "./verify/gate.js";
+import { createVerificationWiring } from "./verify/wiring.js";
 
 // ---------------------------------------------------------------------------
 // Re-exports — type-only re-exports for IDE/test consumers.
@@ -56,11 +45,18 @@ import { dumpSessionScorecards } from "./telemetry/scorecard-dump.js";
 // Tests import from their specific source files instead of this entry point.
 // ---------------------------------------------------------------------------
 
-export type { RouterConfig, TierConfig, Preset, ModeConfig, FallbackConfig, EnforcementConfig } from "./router/config.js";
-export type { Cap, SubagentState };
-export type { TrajectoryState, TrajectoryToolEvent } from "./telemetry/trajectory.js";
+export type { GuardCall, GuardDecision, GuardPolicy, GuardState } from "./guard/guards.js";
+export type {
+  EnforcementConfig,
+  FallbackConfig,
+  ModeConfig,
+  Preset,
+  RouterConfig,
+  TierConfig,
+} from "./router/config.js";
 export type { EnforcementMode } from "./router/enforcement.js";
-export type { GuardPolicy, GuardState, GuardCall, GuardDecision } from "./guard/guards.js";
+export type { TrajectoryState, TrajectoryToolEvent } from "./telemetry/trajectory.js";
+export type { Cap, SubagentState };
 
 const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
   let cfg = loadConfig();
@@ -96,12 +92,11 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
   // Layer-2's impure corner: exec, fs, and the opencode client, built once and
   // read back through getConfig so a reloaded cfg (from /preset, /budget or
   // /router enforce) applies to graded work too.
-  const { graderSessions, buildGateDeps, disposeChildSession } =
-    createVerificationWiring({
-      client: ctx.client,
-      directory: ctx.directory,
-      getConfig: () => cfg,
-    });
+  const { graderSessions, buildGateDeps, disposeChildSession } = createVerificationWiring({
+    client: ctx.client,
+    directory: ctx.directory,
+    getConfig: () => cfg,
+  });
 
   // Bypass mode: when true, the router skips all system prompt injection,
   // subagent tracking, cap enforcement, and narration detection for the
@@ -151,8 +146,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
   };
 
   const enableDelegateTool =
-    cfg.experimental?.verifiedDelegateTool === true ||
-    process.env.MODEL_ROUTER_VERIFIED_DELEGATE === "1";
+    cfg.experimental?.verifiedDelegateTool === true || process.env.MODEL_ROUTER_VERIFIED_DELEGATE === "1";
 
   return {
     // Warnings post to /log fire-and-forget, which loses the message when the
@@ -213,12 +207,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
       const tierNames = Object.keys(getActiveTiers(cfg));
       const sid = input?.sessionID;
       try {
-        const registration = sessionStore.registerFromChatMessage(
-          input,
-          output,
-          cfg,
-          tierNames,
-        );
+        const registration = sessionStore.registerFromChatMessage(input, output, cfg, tierNames);
         // A same-session same-tier re-registration is a resumed dispatch
         // (how an opencode task_id resume reaches this hook): start a new
         // per-dispatch guard round and count it in telemetry.
@@ -262,14 +251,8 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
                 );
               }
               for (const it of validateModels(cfg, catalog)) {
-                const hint =
-                  it.suggestions.length > 0
-                    ? ` — try ${it.suggestions.join(", ")}`
-                    : "";
-                const where =
-                  it.scope === "fallback"
-                    ? `${it.tier}[${it.providerId}]`
-                    : `@${it.tier}`;
+                const hint = it.suggestions.length > 0 ? ` — try ${it.suggestions.join(", ")}` : "";
+                const where = it.scope === "fallback" ? `${it.tier}[${it.providerId}]` : `@${it.tier}`;
                 logger.warn(`${where} ${it.ref}: ${it.kind}${hint}`, {
                   tier: it.tier,
                   ref: it.ref,
@@ -296,7 +279,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
         return;
       }
       sessionStore.touchIfTracked(sid);
-      let res;
+      let res: ReturnType<typeof guardBeforeCall>;
       try {
         res = guardBeforeCall({
           cfg,
@@ -369,32 +352,21 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
         if (shouldVerifyTask(input.tool, mode, requireMode)) {
           try {
             const { finalReturnText, childSessionID } = parseTaskResult(output);
-            const producerTier =
-              typeof input?.args?.subagent_type === "string"
-                ? input.args.subagent_type
-                : "";
+            const producerTier = typeof input?.args?.subagent_type === "string" ? input.args.subagent_type : "";
             const dod = buildDelegationDoD({
               prompt: input?.args?.prompt,
               description: input?.args?.description,
             });
             const artefact = {
-              changedFiles: childSessionID
-                ? changedFileStore.get(childSessionID)
-                : [],
+              changedFiles: childSessionID ? changedFileStore.get(childSessionID) : [],
               finalReturnText,
               declaredOutputs: dod.deliverable ? [dod.deliverable] : [],
               producerSessionID: childSessionID ?? "",
               producerTier,
             };
-            const trivial = childSessionID
-              ? sessionStore.isTrivial(childSessionID)
-              : false;
+            const trivial = childSessionID ? sessionStore.isTrivial(childSessionID) : false;
 
-            if (
-              dod.source === "inferred" &&
-              dod.kind === "checker" &&
-              artefact.changedFiles.length === 0
-            ) {
+            if (dod.source === "inferred" && dod.kind === "checker" && artefact.changedFiles.length === 0) {
               if (childSessionID) changedFileStore.clear(childSessionID);
               return;
             }
@@ -404,9 +376,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
                 dod,
                 trivial,
                 mode: "modeA",
-                ...(typeof input?.args?.cwd === "string" && input.args.cwd
-                  ? { cwd: input.args.cwd }
-                  : {}),
+                ...(typeof input?.args?.cwd === "string" && input.args.cwd ? { cwd: input.args.cwd } : {}),
               },
               artefact,
               buildGateDeps(),
@@ -416,10 +386,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
               const li = ladder.indexOf(producerTier);
               const nextTier = li >= 0 && li < ladder.length - 1 ? ladder[li + 1] : null;
               const note = scrubText(buildForcingNote(res.verdict.reasons, { producerTier, nextTier }));
-              output.output =
-                typeof output.output === "string"
-                  ? output.output + "\n\n" + note
-                  : note;
+              output.output = typeof output.output === "string" ? `${output.output}\n\n${note}` : note;
             }
             if (childSessionID) changedFileStore.clear(childSessionID);
           } catch {
@@ -440,9 +407,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
       const found = detectNarration(text);
       if (found.length === 0) return;
 
-      const quoted = found
-        .map((m) => `"${m.slice(0, 60)}${m.length > 60 ? "…" : ""}"`)
-        .join(", ");
+      const quoted = found.map((m) => `"${m.slice(0, 60)}${m.length > 60 ? "…" : ""}"`).join(", ");
       output.text = `${text}\n\n[⚠ narration detected: ${quoted}]`;
     },
 
@@ -472,9 +437,7 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
             : CLAUDE_TIER_PREFIX[name]
           : undefined;
         const finalPrompt =
-          claudePrefix && resolvedPrompt
-            ? `${claudePrefix}\n\n---\n\n${resolvedPrompt}`
-            : resolvedPrompt;
+          claudePrefix && resolvedPrompt ? `${claudePrefix}\n\n---\n\n${resolvedPrompt}` : resolvedPrompt;
 
         const agentDef: Record<string, unknown> = {
           model: tier.model,
@@ -510,30 +473,25 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
         existingAgents: opencodeConfig.agent,
       });
       for (const [agentName, override] of Object.entries(subagentOverrides)) {
-        opencodeConfig.agent[agentName] = mergeSubagentOverride(
-          opencodeConfig.agent[agentName],
-          override,
-        );
+        opencodeConfig.agent[agentName] = mergeSubagentOverride(opencodeConfig.agent[agentName], override);
       }
 
       opencodeConfig.command ??= {};
-      opencodeConfig.command["tiers"] = {
+      opencodeConfig.command.tiers = {
         template: "",
         description: "Show model delegation tiers and rules",
       };
-      opencodeConfig.command["preset"] = {
+      opencodeConfig.command.preset = {
         template: "$ARGUMENTS",
         description: "Show or switch model presets (e.g., /preset openai)",
       };
-      opencodeConfig.command["budget"] = {
+      opencodeConfig.command.budget = {
         template: "$ARGUMENTS",
-        description:
-          "Show or switch routing mode (e.g., /budget, /budget budget, /budget quality)",
+        description: "Show or switch routing mode (e.g., /budget, /budget budget, /budget quality)",
       };
-      opencodeConfig.command["bypass"] = {
+      opencodeConfig.command.bypass = {
         template: "$ARGUMENTS",
-        description:
-          "Toggle model-router bypass (disables delegation protocol for this session)",
+        description: "Toggle model-router bypass (disables delegation protocol for this session)",
       };
       opencodeConfig.command["annotate-plan"] = {
         template: [
@@ -563,16 +521,15 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
           "## Acceptance blocks (for enforcement)",
           "For each NON-TRIVIAL task, append an acceptance block immediately after the step so the router can verify the work:",
           "[acceptance]",
-          "check: <testsPass | buildPasses | lintClean | fileExists path=... | run command=\"...\" expect=...>",
+          'check: <testsPass | buildPasses | lintClean | fileExists path=... | run command="..." expect=...>',
           "criteria: <plain-language success condition, when no deterministic check applies>",
           "deliverable: <path or short description>",
           "[/acceptance]",
           "Prefer deterministic checks (testsPass/buildPasses/fileExists). Use a criteria line for design/explanatory tasks. Trivial read-only steps need no acceptance block.",
         ].join("\n"),
-        description:
-          "Annotate a plan with [tier:fast/medium/heavy] delegation tags",
+        description: "Annotate a plan with [tier:fast/medium/heavy] delegation tags",
       };
-      opencodeConfig.command["router"] = {
+      opencodeConfig.command.router = {
         template: "$ARGUMENTS",
         description:
           "Model-router controls (e.g., /router enforce off|advisory|enforced, /router overrides, /router models)",
@@ -596,7 +553,9 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
       const orchestratorModel = providerID && modelID ? `${providerID}/${modelID}` : modelID;
 
       let enfOn = false;
-      try { enfOn = resolveEnforcementMode({ config: cfg, env: process.env }).mode !== "off"; } catch {}
+      try {
+        enfOn = resolveEnforcementMode({ config: cfg, env: process.env }).mode !== "off";
+      } catch {}
       output.system.push(assembleSystemPrompt(cfg, orchestratorModel, enfOn));
     },
 
@@ -604,23 +563,19 @@ const ModelRouterPlugin: Plugin = async (ctx: PluginInput) => {
     // Handle /tiers, /preset, /bypass, /budget, and /router commands
     // -----------------------------------------------------------------------
     "command.execute.before": async (input: any, output: any) => {
-      const result = await dispatchRouterCommand(
-        input?.command,
-        input?.arguments ?? "",
-        {
-          getConfig: () => {
-            try {
-              cfg = loadConfig();
-            } catch {}
-            return cfg;
-          },
-          getBypassed: () => bypassed,
-          setBypassed: (val) => {
-            bypassed = val;
-          },
-          fetchCatalog,
+      const result = await dispatchRouterCommand(input?.command, input?.arguments ?? "", {
+        getConfig: () => {
+          try {
+            cfg = loadConfig();
+          } catch {}
+          return cfg;
         },
-      );
+        getBypassed: () => bypassed,
+        setBypassed: (val) => {
+          bypassed = val;
+        },
+        fetchCatalog,
+      });
 
       if (result !== null) {
         output.parts.push({

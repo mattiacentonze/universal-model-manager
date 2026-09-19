@@ -1,8 +1,8 @@
-import { LatencyTracker } from "./latency-tracker.js";
 import { CostTracker } from "./cost-tracker.js";
+import { LatencyTracker } from "./latency-tracker.js";
 
-export * from "./latency-tracker.js";
 export * from "./cost-tracker.js";
+export * from "./latency-tracker.js";
 
 export class TelemetryStore {
   private static instance: TelemetryStore;

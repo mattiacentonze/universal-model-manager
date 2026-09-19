@@ -1,8 +1,7 @@
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import type { FallbackTarget, ManagerConfig, TierChain, TierName } from "../manager/types.js";
 import { providerConfigured } from "../manager/auth-status.js";
+import type { FallbackTarget, ManagerConfig, TierChain, TierName } from "../manager/types.js";
 import { currentStep, firstMissingStep } from "../manager/wizard.js";
-import { getAccounts } from "../manager/provider-accounts.js";
 
 export const TIERS: readonly TierName[] = ["fast", "medium", "heavy"] as const;
 
@@ -36,7 +35,7 @@ export function nextMissingStep(cfg: ManagerConfig, configDir: string): WStep | 
 
 /** Ordered selection of tiers still needing confirmation or a valid model. */
 export function missingTiers(cfg: ManagerConfig): TierName[] {
-  return TIERS.filter(t => !cfg.wizard?.tiersConfirmed?.[t] || !cfg.router.tiers[t].model);
+  return TIERS.filter((t) => !cfg.wizard?.tiersConfirmed?.[t] || !cfg.router.tiers[t].model);
 }
 
 /** A tier is configured when it is confirmed and has a valid model. */
@@ -49,13 +48,13 @@ export function tierComplete(cfg: ManagerConfig, tier: TierName): boolean {
 export function chainTargets(chain: TierChain): FallbackTarget[] {
   if (chain.targets?.length) return chain.targets;
   const map = chain.fallbackVariants ?? {};
-  return chain.fallback.map(model => ({ model, variant: map[model] }));
+  return chain.fallback.map((model) => ({ model, variant: map[model] }));
 }
 
 /** Format a clean, friendly model name without wrapper tags like (Antigravity). */
 export function formatCleanModelName(id: string, rawLabel?: string): string {
   if (!id) return "None";
-  const [provider, modelKey] = id.includes("/") ? id.split("/") : ["", id];
+  const [_provider, modelKey] = id.includes("/") ? id.split("/") : ["", id];
   let label = rawLabel || modelKey || id;
 
   // Strip "(Antigravity)", "(antigravity)", or "antigravity-"
@@ -89,8 +88,8 @@ export function formatCleanModelName(id: string, rawLabel?: string): string {
 
 /** Distinct reasoning variants known for a model from the real catalog (never guessed). */
 export function catalogVariants(model: string, models: CatalogModel[]): string[] {
-  const matched = models.filter(m => m.id === model && m.variant);
-  const known = [...new Set(matched.map(m => m.variant as string))];
+  const matched = models.filter((m) => m.id === model && m.variant);
+  const known = [...new Set(matched.map((m) => m.variant as string))];
   if (known.length > 0) return known;
   const lower = model.toLowerCase();
   if (
@@ -107,7 +106,11 @@ export function catalogVariants(model: string, models: CatalogModel[]): string[]
 }
 
 /** Variant picker options for a tier model, seeded from the real catalog. */
-export function tierVariantOptions(model: string, catalogVariants: string[], current?: string): { title: string; value: string | undefined }[] {
+export function tierVariantOptions(
+  _model: string,
+  catalogVariants: string[],
+  current?: string,
+): { title: string; value: string | undefined }[] {
   const out: { title: string; value: string | undefined }[] = [];
   if (current) out.push({ title: `Current: ${current}`, value: current });
   out.push({ title: "Default (no variant)", value: undefined });
@@ -160,5 +163,5 @@ export function stepLabel(step: string | null): string {
   return "Complete";
 }
 
+export type { FallbackTarget, ManagerConfig, TierName };
 export { currentStep, firstMissingStep, providerConfigured };
-export type { ManagerConfig, TierName, FallbackTarget };

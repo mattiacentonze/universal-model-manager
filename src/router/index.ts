@@ -1,14 +1,14 @@
 import type { Config, Hooks } from "@opencode-ai/plugin";
 import type { Model as ModelV2 } from "@opencode-ai/sdk/v2";
-import type { RouterSettings } from "../manager/types.js";
-import { loadConfig, tierTargets } from "../manager/store.js";
 import { buildAgentConfig } from "../manager/operations.js";
+import { loadConfig, tierTargets } from "../manager/store.js";
+import type { RouterSettings } from "../manager/types.js";
 import { logger } from "../shared/logger.js";
 
 const TIERS = ["fast", "medium", "heavy"] as const;
 
 /** Purpose line for the routing protocol injected into the system prompt. */
-function tierPurpose(tier: (typeof TIERS)[number], chain: RouterSettings["tiers"][typeof TIERS[number]]): string {
+function tierPurpose(tier: (typeof TIERS)[number], chain: RouterSettings["tiers"][(typeof TIERS)[number]]): string {
   const purpose: Record<(typeof TIERS)[number], string> = {
     fast: "read-only exploration and quick searches",
     medium: "implementation and refactoring",
@@ -19,7 +19,7 @@ function tierPurpose(tier: (typeof TIERS)[number], chain: RouterSettings["tiers"
 
 /** Original compact routing protocol describing tiers, tags and dispatch rules. */
 export function routerProtocol(settings: RouterSettings): string {
-  const lines = TIERS.map(t => tierPurpose(t, settings.tiers[t]));
+  const lines = TIERS.map((t) => tierPurpose(t, settings.tiers[t]));
   return [
     "## Routing protocol (manager-owned)",
     ...lines,
@@ -33,9 +33,9 @@ export function routerProtocol(settings: RouterSettings): string {
 /** Variant configured for a model across the manager's tier chains (if any). */
 function variantForModel(settings: RouterSettings, agent: string, modelID: string): string | undefined {
   if (!(TIERS as readonly string[]).includes(agent)) return undefined;
-  const chain = settings.tiers[agent as typeof TIERS[number]];
+  const chain = settings.tiers[agent as (typeof TIERS)[number]];
   if (chain.model === modelID) return chain.variant;
-  return tierTargets(chain).find(target => target.model === modelID)?.variant;
+  return tierTargets(chain).find((target) => target.model === modelID)?.variant;
 }
 
 /**
@@ -56,7 +56,7 @@ export function managerRouterHooks(settings: RouterSettings | undefined): Hooks 
       // Preserve user-authored fields on agents we own (prompt, tools, etc.).
       for (const name of ["build", ...TIERS] as const) {
         const { model: _model, variant: _variant, ...rest } = cfg.agent[name] ?? {};
-        cfg.agent[name] = { ...rest, ...agents[name]! };
+        cfg.agent[name] = { ...rest, ...(agents[name] ?? {}) };
       }
     },
     "experimental.chat.system.transform": async (_input, output) => {

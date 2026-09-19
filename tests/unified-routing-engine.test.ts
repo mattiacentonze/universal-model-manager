@@ -1,15 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  translateToProvider,
   defaultParametersForMode,
   mapLegacyRoutingMode,
-  validateConfig,
-  emptyConfig,
+  translateToProvider,
   type UnifiedRoutingConfig,
+  validateConfig,
 } from "../src/manager/index.js";
-import { LatencyTracker } from "../src/telemetry/latency-tracker.js";
 import { CostTracker } from "../src/telemetry/cost-tracker.js";
-import { TelemetryStore, telemetry } from "../src/telemetry/index.js";
+import { telemetry } from "../src/telemetry/index.js";
+import { LatencyTracker } from "../src/telemetry/latency-tracker.js";
 
 describe("Unified Routing Engine", () => {
   describe("Static field-name mapping (translateToProvider)", () => {

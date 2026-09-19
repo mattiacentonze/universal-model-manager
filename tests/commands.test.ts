@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { handleManagerCommand, completeStep, loadConfig, isWizardComplete, summarize } from "../src/manager/index.js";
+import { completeStep, handleManagerCommand, isWizardComplete, loadConfig, summarize } from "../src/manager/index.js";
 import { emptyConfig } from "../src/manager/store.js";
 import { fakeConfigDir, writeProviderCreds } from "./helpers.js";
 
@@ -18,8 +18,25 @@ describe("Manager slash-command handler", () => {
     writeProviderCreds(fakeConfigDir(), ["openai", "antigravity"]);
     // Reach a complete state first.
     const cfg = emptyConfig();
-    completeStep("accounts", { accounts: [{ ...cfg.accounts[0], configured: true }, { ...cfg.accounts[1], configured: true }] }, dir);
-    completeStep("tiers", { fast: { model: cfg.router.tiers.fast.model }, medium: { model: cfg.router.tiers.medium.model }, heavy: { model: cfg.router.tiers.heavy.model } }, dir);
+    completeStep(
+      "accounts",
+      {
+        accounts: [
+          { ...cfg.accounts[0], configured: true },
+          { ...cfg.accounts[1], configured: true },
+        ],
+      },
+      dir,
+    );
+    completeStep(
+      "tiers",
+      {
+        fast: { model: cfg.router.tiers.fast.model },
+        medium: { model: cfg.router.tiers.medium.model },
+        heavy: { model: cfg.router.tiers.heavy.model },
+      },
+      dir,
+    );
     completeStep("router", { orchestrator: cfg.router.orchestrator }, dir);
     expect(isWizardComplete(loadConfig(dir))).toBe(true);
 

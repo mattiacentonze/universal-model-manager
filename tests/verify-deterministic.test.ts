@@ -1,14 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   createMutexRegistry,
   DEFAULT_ALLOWLIST,
   FORBIDDEN_SHELL,
   isCommandAllowed,
-  shapeMismatch,
   runDeterministic,
+  shapeMismatch,
 } from "../src/model-router/verify/deterministic.js";
-import type { DeterministicDeps } from "../src/model-router/verify/types.js";
 import type { DoD } from "../src/model-router/verify/dod.js";
+import type { DeterministicDeps } from "../src/model-router/verify/types.js";
 
 describe("model-router/verify/deterministic.ts", () => {
   describe("createMutexRegistry", () => {
@@ -40,7 +40,7 @@ describe("model-router/verify/deterministic.ts", () => {
       await expect(
         mutex.runExclusive("k1", async () => {
           throw new Error("fail");
-        })
+        }),
       ).rejects.toThrow("fail");
 
       const res = await mutex.runExclusive("k1", async () => "recovered");

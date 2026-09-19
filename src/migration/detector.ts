@@ -5,10 +5,7 @@ import { parse } from "jsonc-parser";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import type { DiscoveredLegacyItem, DiscoveryReport } from "./types.js";
 
-export function detectLegacyPluginsAndConfigs(options: {
-  configDir?: string;
-  homeDir?: string;
-} = {}): DiscoveryReport {
+export function detectLegacyPluginsAndConfigs(options: { configDir?: string; homeDir?: string } = {}): DiscoveryReport {
   const configDir = options.configDir || getOpenCodeConfigDir();
   const home = options.homeDir || homedir();
   const items: DiscoveredLegacyItem[] = [];
@@ -52,7 +49,7 @@ export function detectLegacyPluginsAndConfigs(options: {
     openAiSecrets.push("OAuth tokens & refresh leases (openai-auth-state.json)");
   }
 
-  const openAiFoundInConfig = activePlugins.some(p => p.includes("opencode-openai-auth"));
+  const openAiFoundInConfig = activePlugins.some((p) => p.includes("opencode-openai-auth"));
   if (openAiFoundInConfig || openAiFiles.length > 0) {
     items.push({
       id: "cortexkit-openai",
@@ -86,7 +83,7 @@ export function detectLegacyPluginsAndConfigs(options: {
     } catch {}
   }
 
-  const antigravityFoundInConfig = activePlugins.some(p => p.includes("opencode-antigravity-auth"));
+  const antigravityFoundInConfig = activePlugins.some((p) => p.includes("opencode-antigravity-auth"));
   if (antigravityFoundInConfig || antigravityFiles.length > 0) {
     items.push({
       id: "cortexkit-antigravity",
@@ -117,7 +114,7 @@ export function detectLegacyPluginsAndConfigs(options: {
     } catch {}
   }
 
-  const fallbackFoundInConfig = activePlugins.some(p => p.includes("opencode-runtime-fallback"));
+  const fallbackFoundInConfig = activePlugins.some((p) => p.includes("opencode-runtime-fallback"));
   if (fallbackFoundInConfig || fallbackFiles.length > 0) {
     items.push({
       id: "runtime-fallback",
@@ -185,7 +182,9 @@ export function detectLegacyPluginsAndConfigs(options: {
     conflicts.push("@cortexkit/opencode-openai-auth conflicts with universal-model-manager on OpenAI OAuth intercepts");
   }
   if (antigravityFoundInConfig) {
-    conflicts.push("@cortexkit/opencode-antigravity-auth conflicts with universal-model-manager on Google/Antigravity OAuth hooks");
+    conflicts.push(
+      "@cortexkit/opencode-antigravity-auth conflicts with universal-model-manager on Google/Antigravity OAuth hooks",
+    );
   }
   if (fallbackFoundInConfig) {
     conflicts.push("opencode-runtime-fallback conflicts with universal-model-manager on duplicate error replay cycles");

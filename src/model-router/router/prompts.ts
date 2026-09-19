@@ -12,12 +12,7 @@
  * The runtime guard (src/guard/) enforces caps regardless of prompt style — prompt text is
  * advisory; enforcement is mechanical.
  */
-import {
-  DEFAULT_STRONG_MODEL_PATTERNS,
-  type PromptStyle,
-  type RouterConfig,
-  type TierConfig,
-} from "./config.js";
+import { DEFAULT_STRONG_MODEL_PATTERNS, type PromptStyle, type RouterConfig, type TierConfig } from "./config.js";
 
 export const GOAL_ORIENTED_TIER_PROMPTS: Record<string, string> = {
   fast: `You are @fast, a read-only exploration specialist: searching, grepping, reading, listing, looking up docs, checking types, counting, verifying existence, and gathering git info. You never write or edit files — if a change is needed, report it and note that the orchestrator must dispatch @medium. You have no Task tool and cannot sub-delegate.
@@ -58,8 +53,7 @@ Begin your response with exactly one of \`DONE:\` (structured analysis), \`SCOPE
  * and a second, drifting copy of this rule would reintroduce the mismatch it
  * exists to remove.
  */
-export const flattenModelID = (v: string): string =>
-  v.toLowerCase().replace(/[.\-_]/g, "");
+export const flattenModelID = (v: string): string => v.toLowerCase().replace(/[.\-_]/g, "");
 
 /**
  * Substring match against the strong-model pattern list, ignoring case AND
@@ -90,7 +84,11 @@ export function isStrongModel(modelID: string | undefined, cfg: RouterConfig): b
 }
 
 /** Resolve "auto" (or absent) to a concrete style. Fail-safe: unknown/empty model -> prescriptive. */
-export function resolvePromptStyle(style: PromptStyle | undefined, modelID: string | undefined, cfg: RouterConfig): "prescriptive" | "goal-oriented" {
+export function resolvePromptStyle(
+  style: PromptStyle | undefined,
+  modelID: string | undefined,
+  cfg: RouterConfig,
+): "prescriptive" | "goal-oriented" {
   if (style === "prescriptive" || style === "goal-oriented") return style;
   return isStrongModel(modelID, cfg) ? "goal-oriented" : "prescriptive";
 }
@@ -99,7 +97,9 @@ export function resolvePromptStyle(style: PromptStyle | undefined, modelID: stri
 export function selectTierPrompt(tierName: string, tier: TierConfig, cfg: RouterConfig): string | undefined {
   const style = resolvePromptStyle(tier.promptStyle, tier.model, cfg);
   if (style === "goal-oriented") {
-    return cfg.tierPromptsGoalOriented?.[tierName] ?? GOAL_ORIENTED_TIER_PROMPTS[tierName] ?? cfg.tierPrompts?.[tierName];
+    return (
+      cfg.tierPromptsGoalOriented?.[tierName] ?? GOAL_ORIENTED_TIER_PROMPTS[tierName] ?? cfg.tierPrompts?.[tierName]
+    );
   }
   return cfg.tierPrompts?.[tierName];
 }

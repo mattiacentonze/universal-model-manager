@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockDiscover = vi.fn();
 const mockGetRpcDir = vi.fn();
@@ -17,11 +17,11 @@ vi.mock("../vendor/opencode-openai-auth/dist/rpc/port-file.js", () => ({
 }));
 
 import {
-  resolveRpcDir,
-  findPortFile,
-  refreshProviderQuota,
-  refreshAllQuotas,
   createQuotaPoller,
+  findPortFile,
+  refreshAllQuotas,
+  refreshProviderQuota,
+  resolveRpcDir,
 } from "../src/manager/quota-poller.js";
 
 const originalFetch = globalThis.fetch;
@@ -103,9 +103,7 @@ describe("quota-poller", () => {
 
   it("routes task start/complete events to a debounced refresh", async () => {
     const poller = createQuotaPoller();
-    const refreshSpy = vi
-      .spyOn(poller, "refreshAll")
-      .mockResolvedValue({ antigravity: false, openai: false });
+    const refreshSpy = vi.spyOn(poller, "refreshAll").mockResolvedValue({ antigravity: false, openai: false });
 
     await poller.eventHandler({ event: { type: "session.created" } });
     await poller.eventHandler({
@@ -129,9 +127,7 @@ describe("quota-poller", () => {
 
   it("dispose clears timers and stops further refreshes", async () => {
     const poller = createQuotaPoller();
-    const refreshSpy = vi
-      .spyOn(poller, "refreshAll")
-      .mockResolvedValue({ antigravity: false, openai: false });
+    const refreshSpy = vi.spyOn(poller, "refreshAll").mockResolvedValue({ antigravity: false, openai: false });
     poller.dispose();
     await poller.eventHandler({ event: { type: "session.created" } });
     await vi.advanceTimersByTimeAsync(10_000);

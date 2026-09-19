@@ -61,7 +61,8 @@ export class ZenUsageTracker {
         buckets: Array.isArray(parsed?.buckets) ? parsed.buckets : [],
         rateLimitedUntil: typeof parsed?.rateLimitedUntil === "number" ? parsed.rateLimitedUntil : null,
         lastError: typeof parsed?.lastError === "string" ? parsed.lastError : null,
-        estimatedDailyLimit: typeof parsed?.estimatedDailyLimit === "number" ? parsed.estimatedDailyLimit : DEFAULT_ESTIMATED_DAILY_LIMIT,
+        estimatedDailyLimit:
+          typeof parsed?.estimatedDailyLimit === "number" ? parsed.estimatedDailyLimit : DEFAULT_ESTIMATED_DAILY_LIMIT,
       };
     } catch {
       return {
@@ -84,7 +85,7 @@ export class ZenUsageTracker {
   recordUsage(inputTokens: number, outputTokens: number, timestamp = Date.now()): void {
     const state = this.readState();
     const cutoff = timestamp - WINDOW_24H_MS;
-    const activeBuckets = state.buckets.filter(b => b.timestamp > cutoff);
+    const activeBuckets = state.buckets.filter((b) => b.timestamp > cutoff);
     activeBuckets.push({ timestamp, inputTokens, outputTokens });
     state.buckets = activeBuckets;
     this.writeState(state);
@@ -116,7 +117,7 @@ export class ZenUsageTracker {
     const state = this.readState();
     const now = Date.now();
     const cutoff = now - WINDOW_24H_MS;
-    const active = state.buckets.filter(b => b.timestamp > cutoff);
+    const active = state.buckets.filter((b) => b.timestamp > cutoff);
 
     let inputTokens24h = 0;
     let outputTokens24h = 0;

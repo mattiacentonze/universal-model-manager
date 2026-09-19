@@ -5,11 +5,7 @@
 // raw payload is handed here for normalization and analysis.
 // ---------------------------------------------------------------------------
 
-import {
-  DEFAULT_STRONG_MODEL_PATTERNS,
-  parseModelRef,
-  type RouterConfig,
-} from "./config.js";
+import { DEFAULT_STRONG_MODEL_PATTERNS, parseModelRef, type RouterConfig } from "./config.js";
 import { flattenModelID } from "./prompts.js";
 import { getActiveTiers } from "./protocol.js";
 
@@ -41,31 +37,20 @@ export function normalizeCatalog(raw: unknown): Catalog {
   const providers: CatalogProvider[] = [];
   if (raw && typeof raw === "object") {
     const r = raw as Record<string, unknown>;
-    const defaults =
-      r.default && typeof r.default === "object"
-        ? (r.default as Record<string, unknown>)
-        : {};
+    const defaults = r.default && typeof r.default === "object" ? (r.default as Record<string, unknown>) : {};
     const list = Array.isArray(r.providers) ? r.providers : [];
     for (const p of list) {
       if (!p || typeof p !== "object") continue;
       const prov = p as Record<string, unknown>;
       if (typeof prov.id !== "string") continue;
-      const modelsObj =
-        prov.models && typeof prov.models === "object"
-          ? (prov.models as Record<string, unknown>)
-          : {};
-      const models: CatalogModel[] = Object.entries(modelsObj).map(
-        ([key, m]) => {
-          const mm = (m && typeof m === "object" ? m : {}) as Record<
-            string,
-            unknown
-          >;
-          return {
-            id: typeof mm.id === "string" ? mm.id : key,
-            status: typeof mm.status === "string" ? mm.status : undefined,
-          };
-        },
-      );
+      const modelsObj = prov.models && typeof prov.models === "object" ? (prov.models as Record<string, unknown>) : {};
+      const models: CatalogModel[] = Object.entries(modelsObj).map(([key, m]) => {
+        const mm = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
+        return {
+          id: typeof mm.id === "string" ? mm.id : key,
+          status: typeof mm.status === "string" ? mm.status : undefined,
+        };
+      });
       const def = defaults[prov.id];
       providers.push({
         id: prov.id,
@@ -91,10 +76,7 @@ export function isCatalogEmpty(catalog: Catalog): boolean {
  */
 export { parseModelRef };
 
-function findProvider(
-  catalog: Catalog,
-  providerId: string,
-): CatalogProvider | undefined {
+function findProvider(catalog: Catalog, providerId: string): CatalogProvider | undefined {
   return catalog.providers.find((p) => p.id === providerId);
 }
 
@@ -109,26 +91,25 @@ export function editDistance(a: string, b: string): number {
     curr[0] = i;
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const prevJ = prev[j] ?? 0;
+      const currPrev = curr[j - 1] ?? 0;
+      const prevPrev = prev[j - 1] ?? 0;
       curr[j] = Math.min(
-        prev[j]! + 1, // deletion
-        curr[j - 1]! + 1, // insertion
-        prev[j - 1]! + cost, // substitution
+        prevJ + 1, // deletion
+        currPrev + 1, // insertion
+        prevPrev + cost, // substitution
       );
     }
     [prev, curr] = [curr, prev];
   }
-  return prev[b.length]!;
+  return prev[b.length] ?? 0;
 }
 
 /**
  * Rank a provider's model ids by closeness to `target`, preferring non-deprecated
  * models. Returns up to `limit` model ids.
  */
-export function suggestModels(
-  target: string,
-  models: CatalogModel[],
-  limit = 3,
-): string[] {
+export function suggestModels(target: string, models: CatalogModel[], limit = 3): string[] {
   return models
     .map((m) => ({
       id: m.id,
@@ -180,16 +161,11 @@ export function suggestModels(
  * trades a real signal for speculative noise. The tier the user is actually
  * running is what this check speaks about.
  */
-export function findOrphanedStrongPatterns(
-  cfg: RouterConfig,
-  catalog: Catalog,
-): string[] {
+export function findOrphanedStrongPatterns(cfg: RouterConfig, catalog: Catalog): string[] {
   if (isCatalogEmpty(catalog)) return [];
 
   const tiers = Object.values(getActiveTiers(cfg) ?? {});
-  const usesAuto = tiers.some(
-    (t) => t?.promptStyle === undefined || t.promptStyle === "auto",
-  );
+  const usesAuto = tiers.some((t) => t?.promptStyle === undefined || t.promptStyle === "auto");
   if (!usesAuto) return [];
 
   const refs: string[] = [];
@@ -200,9 +176,7 @@ export function findOrphanedStrongPatterns(
 
   const configured = cfg.modelGenerations?.strong;
   const raw = configured ?? DEFAULT_STRONG_MODEL_PATTERNS;
-  const patterns = raw.filter(
-    (p): p is string => typeof p === "string" && p.length > 0,
-  );
+  const patterns = raw.filter((p): p is string => typeof p === "string" && p.length > 0);
   // Exactly isStrongModel()'s rule, via the shared normalizer: case- and
   // separator-insensitive substring match. A pattern that flattens to nothing
   // (e.g. "---") matches nothing there, so it is an orphan here too.
@@ -264,9 +238,7 @@ export interface ModelIssue {
  * precedence as `buildFallbackInstructions` in ./protocol: a non-empty
  * preset-specific map wins over `fallback.global`.
  */
-function activeFallbackMap(
-  cfg: RouterConfig,
-): { source: string; map: Record<string, unknown> } | undefined {
+function activeFallbackMap(cfg: RouterConfig): { source: string; map: Record<string, unknown> } | undefined {
   const fb = cfg.fallback;
   if (!fb) return undefined;
   const presetMap = fb.presets?.[cfg.activePreset];
@@ -294,11 +266,7 @@ function activeFallbackMap(
  * Dedupe: a provider already reported unknown from a tier model is not reported
  * a second time from a fallback key — `knownBadProviders` carries those ids.
  */
-function validateFallbackChains(
-  cfg: RouterConfig,
-  catalog: Catalog,
-  knownBadProviders: Set<string>,
-): ModelIssue[] {
+function validateFallbackChains(cfg: RouterConfig, catalog: Catalog, knownBadProviders: Set<string>): ModelIssue[] {
   const active = activeFallbackMap(cfg);
   if (!active) return [];
 
@@ -395,11 +363,7 @@ export function validateModels(cfg: RouterConfig, catalog: Catalog): ModelIssue[
   return issues;
 }
 
-function validateTierModels(
-  cfg: RouterConfig,
-  catalog: Catalog,
-  badProviders: Set<string>,
-): ModelIssue[] {
+function validateTierModels(cfg: RouterConfig, catalog: Catalog, badProviders: Set<string>): ModelIssue[] {
   const issues: ModelIssue[] = [];
   const preset = getActiveTiers(cfg);
 
@@ -433,17 +397,13 @@ function validateTierModels(
         modelId: parsed.modelId,
         kind: "model-missing",
         scope: "tier",
-        suggestions: suggestModels(parsed.modelId, provider.models).map(
-          (id) => `${parsed.providerId}/${id}`,
-        ),
+        suggestions: suggestModels(parsed.modelId, provider.models).map((id) => `${parsed.providerId}/${id}`),
       });
       continue;
     }
 
     if (model.status === "deprecated") {
-      const alternatives = provider.models.filter(
-        (m) => m.status !== "deprecated",
-      );
+      const alternatives = provider.models.filter((m) => m.status !== "deprecated");
       issues.push({
         tier,
         ref,
@@ -451,9 +411,7 @@ function validateTierModels(
         modelId: parsed.modelId,
         kind: "model-deprecated",
         scope: "tier",
-        suggestions: suggestModels(parsed.modelId, alternatives).map(
-          (id) => `${parsed.providerId}/${id}`,
-        ),
+        suggestions: suggestModels(parsed.modelId, alternatives).map((id) => `${parsed.providerId}/${id}`),
       });
     }
   }

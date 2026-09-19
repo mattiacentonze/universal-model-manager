@@ -10,10 +10,10 @@ export type CheckKind = "run" | "fileExists" | "schemaMatch" | "testsPass" | "bu
 
 export interface Check {
   kind: CheckKind;
-  command?: string;   // run/testsPass/buildPasses/lintClean (optional; runner supplies a default later)
-  expect?: string;    // run: expected substring in output (optional)
-  path?: string;      // fileExists/schemaMatch
-  schema?: string;    // schemaMatch: inline JSON or a path
+  command?: string; // run/testsPass/buildPasses/lintClean (optional; runner supplies a default later)
+  expect?: string; // run: expected substring in output (optional)
+  path?: string; // fileExists/schemaMatch
+  schema?: string; // schemaMatch: inline JSON or a path
 }
 
 export type DoDKind = "deterministic" | "checker" | "none";
@@ -21,8 +21,8 @@ export type DoDSource = "explicit" | "inferred" | "annotation" | "none";
 
 export interface DoD {
   kind: DoDKind;
-  checks: Check[];        // [] when none/checker-only
-  criteria: string[];     // [] when none
+  checks: Check[]; // [] when none/checker-only
+  criteria: string[]; // [] when none
   deliverable: string | null;
   source: DoDSource;
 }
@@ -39,12 +39,15 @@ export interface InferHints {
 // ---------------------------------------------------------------------------
 
 const VALID_CHECK_KINDS: ReadonlySet<string> = new Set<string>([
-  "run", "fileExists", "schemaMatch", "testsPass", "buildPasses", "lintClean",
+  "run",
+  "fileExists",
+  "schemaMatch",
+  "testsPass",
+  "buildPasses",
+  "lintClean",
 ]);
 
-const VALID_DOD_KINDS: ReadonlySet<string> = new Set<string>([
-  "deterministic", "checker", "none",
-]);
+const VALID_DOD_KINDS: ReadonlySet<string> = new Set<string>(["deterministic", "checker", "none"]);
 
 const OPEN_TAG_RE = /^\s*\[(acceptance|dod)\]\s*$/i;
 const CLOSE_TAG_RE = /^\s*\[\/(acceptance|dod)\]\s*$/i;
@@ -89,11 +92,12 @@ export function normalizeDoD(d: DoD): DoD {
 function parseKvPairs(s: string): Record<string, string> {
   const result: Record<string, string> = {};
   const re = /(\w+)=(?:"([^"]*)"|([\S]*))/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) {
+  let m = re.exec(s);
+  while (m !== null) {
     const key = m[1];
     const value = m[2] !== undefined ? m[2] : (m[3] ?? "");
     result[key] = value;
+    m = re.exec(s);
   }
   return result;
 }
@@ -148,10 +152,10 @@ export function parseAcceptanceBlock(text: string, source: DoDSource = "explicit
 
       const kvPairs = parseKvPairs(remainder);
       const check: Check = { kind: kindStr as CheckKind };
-      if (kvPairs["command"] !== undefined) check.command = kvPairs["command"];
-      if (kvPairs["expect"] !== undefined) check.expect = kvPairs["expect"];
-      if (kvPairs["path"] !== undefined) check.path = kvPairs["path"];
-      if (kvPairs["schema"] !== undefined) check.schema = kvPairs["schema"];
+      if (kvPairs.command !== undefined) check.command = kvPairs.command;
+      if (kvPairs.expect !== undefined) check.expect = kvPairs.expect;
+      if (kvPairs.path !== undefined) check.path = kvPairs.path;
+      if (kvPairs.schema !== undefined) check.schema = kvPairs.schema;
       checks.push(check);
     } else if (lline.startsWith("criteria:")) {
       const rest = line.slice("criteria:".length).trim();
@@ -192,7 +196,7 @@ export function parseDoDFromAnnotation(annotationText: string): DoD | null {
 // inferDoD
 // ---------------------------------------------------------------------------
 
-export function inferDoD(dispatchText: string, tier: string, hints: InferHints): DoD {
+export function inferDoD(dispatchText: string, _tier: string, hints: InferHints): DoD {
   // tier accepted for forward-compat; not used in phase 2.1
   const lower = dispatchText.toLowerCase();
 
@@ -234,7 +238,7 @@ export function inferDoD(dispatchText: string, tier: string, hints: InferHints):
       checks.push({ kind: "lintClean", command: hints.lintCommand });
     }
   } else if (category === "writeFile") {
-    checks.push({ kind: "fileExists", path: hints.declaredPath!.trim() });
+    checks.push({ kind: "fileExists", path: hints.declaredPath?.trim() });
   } else if (category === "test") {
     if (hints.testCommand != null && hints.testCommand.trim().length > 0) {
       checks.push({ kind: "testsPass", command: hints.testCommand });
@@ -246,11 +250,7 @@ export function inferDoD(dispatchText: string, tier: string, hints: InferHints):
 
   if (checks.length === 0) {
     const summary = summarizeDispatch(dispatchText);
-    criteria.push(
-      summary.length > 0
-        ? summary
-        : "the delegated task is completed as described in the dispatch",
-    );
+    criteria.push(summary.length > 0 ? summary : "the delegated task is completed as described in the dispatch");
   }
 
   const rawPath = hints.declaredPath != null ? hints.declaredPath.trim() : "";

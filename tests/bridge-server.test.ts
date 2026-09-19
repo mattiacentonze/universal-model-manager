@@ -1,9 +1,9 @@
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BridgeServer } from "../src/chatgpt-web/bridge-server.js";
 import type { ChatGptRunner } from "../src/chatgpt-web/chatgpt-runner.js";
 
 class MockRunner implements Partial<ChatGptRunner> {
-  async runPrompt(prompt: string, options: any = {}): Promise<string> {
+  async runPrompt(_prompt: string, options: any = {}): Promise<string> {
     if (options.onDelta) {
       options.onDelta("Hello ");
       options.onDelta("from ");

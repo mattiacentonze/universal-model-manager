@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatLadderScorecard } from "../escalate/ladder.js";
 import { formatScorecard } from "../guard/enforce.js";
-import { createGuardStore } from "../guard/store.js";
-import { createSessionStore } from "../router/sessions.js";
-import { createTrajectoryStore } from "./trajectory.js";
+import type { createGuardStore } from "../guard/store.js";
+import type { createSessionStore } from "../router/sessions.js";
+import type { createTrajectoryStore } from "./trajectory.js";
 
 export type GuardStore = ReturnType<typeof createGuardStore>;
 export type SessionStore = ReturnType<typeof createSessionStore>;
@@ -27,7 +27,7 @@ export function dumpDelegateScorecard(
     const line = formatLadderScorecard(st, accepted, method);
     const safeSid = sanitizeSessionId(sid);
     mkdirSync(TRAJECTORY_DIR, { recursive: true, mode: 0o700 });
-    writeFileSync(join(TRAJECTORY_DIR, `${safeSid}.delegate.log`), line + "\n", { flag: "a", mode: 0o600 });
+    writeFileSync(join(TRAJECTORY_DIR, `${safeSid}.delegate.log`), `${line}\n`, { flag: "a", mode: 0o600 });
   } catch {
     // best-effort only
   }
@@ -47,7 +47,7 @@ export function dumpSessionScorecards(
       const line = formatScorecard(gstate, sessionStore.getTier(sid));
       const safeSid = sanitizeSessionId(sid);
       mkdirSync(TRAJECTORY_DIR, { recursive: true, mode: 0o700 });
-      writeFileSync(join(TRAJECTORY_DIR, `${safeSid}.scorecard.log`), line + "\n", { flag: "a", mode: 0o600 });
+      writeFileSync(join(TRAJECTORY_DIR, `${safeSid}.scorecard.log`), `${line}\n`, { flag: "a", mode: 0o600 });
     }
   } catch {
     // best-effort: a scorecard must never crash a real session
@@ -60,7 +60,7 @@ export function dumpSessionScorecards(
   try {
     const safeSid = sanitizeSessionId(sid);
     mkdirSync(TRAJECTORY_DIR, { recursive: true, mode: 0o700 });
-    writeFileSync(join(TRAJECTORY_DIR, `${safeSid}.log`), dump + "\n", { flag: "a", mode: 0o600 });
+    writeFileSync(join(TRAJECTORY_DIR, `${safeSid}.log`), `${dump}\n`, { flag: "a", mode: 0o600 });
   } catch {
     // best-effort
   }

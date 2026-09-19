@@ -1,5 +1,5 @@
-import { fingerprintToolCall } from "./fingerprint.js";
 import { READ_ONLY_TOOLS } from "../router/sessions.js";
+import { fingerprintToolCall } from "./fingerprint.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -159,11 +159,7 @@ export function classify(call: GuardCall, policy: GuardPolicy): GuardKind {
 // evaluateGuards
 // ---------------------------------------------------------------------------
 
-export function evaluateGuards(
-  state: GuardState,
-  call: GuardCall,
-  policy: GuardPolicy,
-): GuardDecision {
+export function evaluateGuards(state: GuardState, call: GuardCall, policy: GuardPolicy): GuardDecision {
   const fp = fingerprintToolCall(call.tool, call.args);
   let kind = classify(call, policy);
 
@@ -199,10 +195,7 @@ export function evaluateGuards(
   // CLAUSE 3b: cumulative budget across resumed dispatches. Without this, a
   // session that keeps getting resumed gets a fresh per-dispatch budget every
   // round — an unbounded loop that CLAUSE 3 alone cannot see.
-  if (
-    policy.cumulativeBudget !== undefined &&
-    state.totalToolCallCount >= policy.cumulativeBudget
-  ) {
+  if (policy.cumulativeBudget !== undefined && state.totalToolCallCount >= policy.cumulativeBudget) {
     return {
       allow: false,
       guard: "cumulative_iteration_cap",
@@ -298,10 +291,7 @@ export function updateState(
 // recordBlock
 // ---------------------------------------------------------------------------
 
-export function recordBlock(
-  state: GuardState,
-  decision: GuardDecision,
-): GuardState {
+export function recordBlock(state: GuardState, decision: GuardDecision): GuardState {
   state.lastBlock = decision.guard;
   state.blockedCount += 1;
   if (decision.guard === "redundant_read") state.redundantCount += 1;
@@ -313,12 +303,7 @@ export function recordBlock(
 // ---------------------------------------------------------------------------
 
 export function forcingMessage(state: GuardState, policy: GuardPolicy): string {
-  const deliverable =
-    policy.deliverableSignal == null
-      ? "n/a"
-      : state.deliverableExecuted
-        ? "ran"
-        : "NOT RUN";
+  const deliverable = policy.deliverableSignal == null ? "n/a" : state.deliverableExecuted ? "ran" : "NOT RUN";
 
   const next =
     policy.deliverableSignal != null && !state.deliverableExecuted
@@ -335,8 +320,7 @@ export function forcingMessage(state: GuardState, policy: GuardPolicy): string {
 export function trajectoryMetrics(state: GuardState): Record<string, unknown> {
   return {
     ttfa: state.ttfa,
-    read_exec_ratio:
-      state.execCount === 0 ? state.readCount : state.readCount / state.execCount,
+    read_exec_ratio: state.execCount === 0 ? state.readCount : state.readCount / state.execCount,
     self_script_count: state.selfScriptCount,
     tool_call_count: state.toolCallCount,
     total_tool_call_count: state.totalToolCallCount,
@@ -352,17 +336,7 @@ export function trajectoryMetrics(state: GuardState): Record<string, unknown> {
 // observationOk
 // ---------------------------------------------------------------------------
 
-const ERROR_PREFIXES = [
-  "DENIED",
-  "BLOCKED",
-  "Error",
-  "error:",
-  "ERROR",
-  "Exception",
-  "Traceback",
-  "FAIL",
-  "failed:",
-];
+const ERROR_PREFIXES = ["DENIED", "BLOCKED", "Error", "error:", "ERROR", "Exception", "Traceback", "FAIL", "failed:"];
 
 /**
  * Heuristic: did a tool result indicate success? Used by the after-hook to set

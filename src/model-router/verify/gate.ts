@@ -16,14 +16,14 @@
  *  - PURE: all side-effecting work (exec/fs/grader dispatch) is injected via
  *    deps; this module imports no fs/network/SDK.
  */
-import type { Verdict } from "./types.js";
-import type { DeterministicDeps } from "./types.js";
+
+import type { ArtefactView, CheckerDeps } from "./checker.js";
+import { runChecker } from "./checker.js";
+import { runDeterministic } from "./deterministic.js";
 import type { DoD } from "./dod.js";
 import { isCheckable } from "./dod.js";
-import { runDeterministic } from "./deterministic.js";
-import { runChecker } from "./checker.js";
-import type { ArtefactView, CheckerDeps } from "./checker.js";
 import { resolveBaseDir } from "./paths.js";
+import type { DeterministicDeps, Verdict } from "./types.js";
 
 /** The concrete, inspectable result of a delegation (artefact contract §3.3). */
 export interface Artefact {
@@ -81,11 +81,7 @@ function view(artefact: Artefact): ArtefactView {
  * Returns { accepted, verdict, dodSource }; accepted is true ONLY when a
  * verifier returned pass===true (or the gate is explicitly disabled).
  */
-export async function accept(
-  delegation: Delegation,
-  artefact: Artefact,
-  deps: GateDeps,
-): Promise<GateResult> {
+export async function accept(delegation: Delegation, artefact: Artefact, deps: GateDeps): Promise<GateResult> {
   const dod = delegation.dod;
   const dodSource = dod.source;
   const require = deps.require ?? "whenDoDPresent";
@@ -158,10 +154,7 @@ export async function accept(
   // THAT directory, not the router's. Both verifiers get the same effective
   // base dir so a deterministic check and a grader can never disagree about
   // where the work was supposed to land.
-  const effectiveBaseDir = resolveBaseDir(
-    delegation.cwd,
-    deps.deterministic.cwd,
-  );
+  const effectiveBaseDir = resolveBaseDir(delegation.cwd, deps.deterministic.cwd);
 
   let verdict: Verdict;
   if (dod.kind === "deterministic") {

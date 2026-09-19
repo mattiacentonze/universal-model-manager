@@ -57,9 +57,7 @@ export class RouterTimeoutError extends Error {
  * DEFAULT ceiling, never "no ceiling".
  */
 export function timeoutMs(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : fallback;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 /**
@@ -71,20 +69,13 @@ export function timeoutMs(value: unknown, fallback: number): number {
  * Losing the race does not stop the underlying work by itself — cancellation is
  * the caller's job (see the module header).
  */
-export async function withTimeout<T>(
-  promise: Promise<T>,
-  budgetMs: number,
-  operation: string,
-): Promise<T> {
+export async function withTimeout<T>(promise: Promise<T>, budgetMs: number, operation: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new RouterTimeoutError(operation, budgetMs)),
-          budgetMs,
-        );
+        timer = setTimeout(() => reject(new RouterTimeoutError(operation, budgetMs)), budgetMs);
       }),
     ]);
   } finally {

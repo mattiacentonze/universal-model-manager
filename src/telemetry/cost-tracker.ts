@@ -1,8 +1,8 @@
 import {
-  WindowedRecord,
-  WindowedAccountState,
-  WindowedTrackerOptions,
+  type WindowedAccountState,
+  type WindowedRecord,
   WindowedTracker,
+  type WindowedTrackerOptions,
 } from "./windowed-tracker.js";
 
 export interface CostRecord extends WindowedRecord {
@@ -41,11 +41,7 @@ export interface CostTrackerOptions extends WindowedTrackerOptions {
   pricing?: Record<string, ModelPricing>;
 }
 
-export class CostTracker extends WindowedTracker<
-  CostRecord,
-  AccountCostState,
-  CostTrackerOptions
-> {
+export class CostTracker extends WindowedTracker<CostRecord, AccountCostState, CostTrackerOptions> {
   private pricing: Record<string, ModelPricing>;
 
   constructor(options: CostTrackerOptions = {}) {
@@ -66,7 +62,7 @@ export class CostTracker extends WindowedTracker<
   }
 
   public calculateCost(model: string, promptTokens: number, completionTokens: number): number {
-    const key = Object.keys(this.pricing).find(k => model.includes(k));
+    const key = Object.keys(this.pricing).find((k) => model.includes(k));
     const p = key ? this.pricing[key] : { promptPer1M: 0.5, completionPer1M: 2.0 };
     const promptCost = (promptTokens / 1_000_000) * p.promptPer1M;
     const completionCost = (completionTokens / 1_000_000) * p.completionPer1M;
@@ -78,10 +74,11 @@ export class CostTracker extends WindowedTracker<
     model: string,
     promptTokens: number,
     completionTokens: number,
-    directCostUsd?: number
+    directCostUsd?: number,
   ): number {
     const now = this.clock();
-    const cost = directCostUsd !== undefined ? directCostUsd : this.calculateCost(model, promptTokens, completionTokens);
+    const cost =
+      directCostUsd !== undefined ? directCostUsd : this.calculateCost(model, promptTokens, completionTokens);
 
     this.addRecord(
       accountId,
@@ -91,7 +88,7 @@ export class CostTracker extends WindowedTracker<
         promptTokens,
         completionTokens,
       },
-      now
+      now,
     );
     return cost;
   }
@@ -100,7 +97,7 @@ export class CostTracker extends WindowedTracker<
     accountId: string | number,
     costOrModel: number | string,
     promptTokens = 0,
-    completionTokens = 0
+    completionTokens = 0,
   ): number {
     let cost: number;
     let model = "";
@@ -129,6 +126,6 @@ export class CostTracker extends WindowedTracker<
   }
 
   public getCheapestAccounts(accountIds: Array<string | number>): string[] {
-    return this.rankAccounts(accountIds, a => this.getAccumulatedCost(a));
+    return this.rankAccounts(accountIds, (a) => this.getAccumulatedCost(a));
   }
 }
