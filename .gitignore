@@ -8,3 +8,5 @@ coverage/
 src/tui-compiled/
 !vendor/*/dist/
 !vendor/*/dist/**
+AGENTS.md
+
