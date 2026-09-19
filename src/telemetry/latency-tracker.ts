@@ -1,76 +1,76 @@
-export interface LatencyRecord {
+import {
+  WindowedRecord,
+  WindowedAccountState,
+  WindowedTrackerOptions,
+  WindowedTracker,
+} from "./windowed-tracker.js";
+
+export interface LatencyRecord extends WindowedRecord {
   timestamp: number;
   durationMs: number;
 }
 
-export interface AccountLatencyState {
+export interface AccountLatencyState extends WindowedAccountState<LatencyRecord> {
   samples: LatencyRecord[];
   ema: number; // Exponential Moving Average
   lastUpdated: number;
 }
 
-export interface LatencyTrackerOptions {
+export interface LatencyTrackerOptions extends WindowedTrackerOptions {
   windowMs?: number;
   alpha?: number; // Smoothing factor for EMA (0 < alpha <= 1)
   clock?: () => number;
 }
 
-export class LatencyTracker {
-  private accounts = new Map<string, AccountLatencyState>();
-  private windowMs: number;
+export class LatencyTracker extends WindowedTracker<
+  LatencyRecord,
+  AccountLatencyState,
+  LatencyTrackerOptions
+> {
   private alpha: number;
-  private clock: () => number;
 
   constructor(options: LatencyTrackerOptions = {}) {
-    this.windowMs = options.windowMs ?? 60_000;
+    super(options, 60_000);
     this.alpha = options.alpha ?? 0.3;
-    this.clock = options.clock ?? (() => Date.now());
+  }
+
+  protected createInitialState(_accountId: string, now: number): AccountLatencyState {
+    const samples: LatencyRecord[] = [];
+    return {
+      records: samples,
+      samples,
+      ema: 0,
+      lastUpdated: now,
+    };
+  }
+
+  protected override onBeforeAddRecord(
+    state: AccountLatencyState,
+    record: LatencyRecord,
+    isNew: boolean,
+    now: number
+  ): void {
+    if (isNew) {
+      state.ema = record.durationMs;
+    } else {
+      state.ema = this.alpha * record.durationMs + (1 - this.alpha) * state.ema;
+    }
+    state.lastUpdated = now;
   }
 
   public recordLatency(accountId: string | number, durationMs: number): void {
-    const key = String(accountId);
     const now = this.clock();
-    let state = this.accounts.get(key);
-    if (!state) {
-      state = {
-        samples: [],
-        ema: durationMs,
-        lastUpdated: now,
-      };
-      this.accounts.set(key, state);
-    } else {
-      state.ema = this.alpha * durationMs + (1 - this.alpha) * state.ema;
-      state.lastUpdated = now;
-    }
-    state.samples.push({ timestamp: now, durationMs });
-    this.prune(state, now);
+    this.addRecord(accountId, { timestamp: now, durationMs }, now);
   }
 
   public getAverageLatency(accountId: string | number): number {
-    const key = String(accountId);
-    const state = this.accounts.get(key);
+    const state = this.getAccount(accountId);
     if (!state) return 0;
     this.prune(state, this.clock());
     return state.ema;
   }
 
   public getRankedAccounts(accountIds: Array<string | number>): string[] {
-    const list = accountIds.map(id => String(id));
-    return [...list].sort((a, b) => {
-      const latA = this.getAverageLatency(a) || Infinity;
-      const latB = this.getAverageLatency(b) || Infinity;
-      return latA - latB;
-    });
-  }
-
-  public clear(): void {
-    this.accounts.clear();
-  }
-
-  private prune(state: AccountLatencyState, now: number): void {
-    const cutoff = now - this.windowMs;
-    while (state.samples.length > 0 && state.samples[0].timestamp < cutoff) {
-      state.samples.shift();
-    }
+    return this.rankAccounts(accountIds, a => this.getAverageLatency(a) || Infinity);
   }
 }

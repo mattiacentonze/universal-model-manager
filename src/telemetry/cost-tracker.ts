@@ -1,11 +1,18 @@
-export interface CostRecord {
+import {
+  WindowedRecord,
+  WindowedAccountState,
+  WindowedTrackerOptions,
+  WindowedTracker,
+} from "./windowed-tracker.js";
+
+export interface CostRecord extends WindowedRecord {
   timestamp: number;
   costUsd: number;
   promptTokens: number;
   completionTokens: number;
 }
 
-export interface AccountCostState {
+export interface AccountCostState extends WindowedAccountState<CostRecord> {
   records: CostRecord[];
   totalCostUsd: number;
   lastResetDay: number;
@@ -28,22 +35,34 @@ export const DEFAULT_MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-6-astra": { promptPer1M: 2.0, completionPer1M: 8.0 },
 };
 
-export interface CostTrackerOptions {
+export interface CostTrackerOptions extends WindowedTrackerOptions {
   windowMs?: number;
   clock?: () => number;
   pricing?: Record<string, ModelPricing>;
 }
 
-export class CostTracker {
-  private accounts = new Map<string, AccountCostState>();
-  private windowMs: number;
-  private clock: () => number;
+export class CostTracker extends WindowedTracker<
+  CostRecord,
+  AccountCostState,
+  CostTrackerOptions
+> {
   private pricing: Record<string, ModelPricing>;
 
   constructor(options: CostTrackerOptions = {}) {
-    this.windowMs = options.windowMs ?? 86_400_000; // 24 hours
-    this.clock = options.clock ?? (() => Date.now());
+    super(options, 86_400_000); // 24 hours
     this.pricing = { ...DEFAULT_MODEL_PRICING, ...options.pricing };
+  }
+
+  protected createInitialState(_accountId: string, now: number): AccountCostState {
+    return {
+      records: [],
+      totalCostUsd: 0,
+      lastResetDay: Math.floor(now / 86_400_000),
+    };
+  }
+
+  protected override onAfterPrune(state: AccountCostState, _now: number): void {
+    state.totalCostUsd = state.records.reduce((sum, r) => sum + r.costUsd, 0);
   }
 
   public calculateCost(model: string, promptTokens: number, completionTokens: number): number {
@@ -61,27 +80,19 @@ export class CostTracker {
     completionTokens: number,
     directCostUsd?: number
   ): number {
-    const key = String(accountId);
     const now = this.clock();
     const cost = directCostUsd !== undefined ? directCostUsd : this.calculateCost(model, promptTokens, completionTokens);
 
-    let state = this.accounts.get(key);
-    if (!state) {
-      state = {
-        records: [],
-        totalCostUsd: 0,
-        lastResetDay: Math.floor(now / 86_400_000),
-      };
-      this.accounts.set(key, state);
-    }
-
-    state.records.push({
-      timestamp: now,
-      costUsd: cost,
-      promptTokens,
-      completionTokens,
-    });
-    this.prune(state, now);
+    this.addRecord(
+      accountId,
+      {
+        timestamp: now,
+        costUsd: cost,
+        promptTokens,
+        completionTokens,
+      },
+      now
+    );
     return cost;
   }
 
@@ -111,31 +122,13 @@ export class CostTracker {
   }
 
   public getAccumulatedCost(accountId: string | number): number {
-    const key = String(accountId);
-    const state = this.accounts.get(key);
+    const state = this.getAccount(accountId);
     if (!state) return 0;
     this.prune(state, this.clock());
     return state.totalCostUsd;
   }
 
   public getCheapestAccounts(accountIds: Array<string | number>): string[] {
-    const list = accountIds.map(id => String(id));
-    return [...list].sort((a, b) => {
-      const costA = this.getAccumulatedCost(a);
-      const costB = this.getAccumulatedCost(b);
-      return costA - costB;
-    });
-  }
-
-  public clear(): void {
-    this.accounts.clear();
-  }
-
-  private prune(state: AccountCostState, now: number): void {
-    const cutoff = now - this.windowMs;
-    while (state.records.length > 0 && state.records[0].timestamp < cutoff) {
-      state.records.shift();
-    }
-    state.totalCostUsd = state.records.reduce((sum, r) => sum + r.costUsd, 0);
+    return this.rankAccounts(accountIds, a => this.getAccumulatedCost(a));
   }
 }

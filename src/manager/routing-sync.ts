@@ -1,9 +1,17 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { getOpenCodeConfigDir, getUniversalAuthDataDir } from "../shared/paths.js";
 import { loadConfig, saveConfig, defaultParametersForMode } from "./store.js";
 import type { UnifiedRoutingConfig, UnifiedRoutingMode, UnifiedRoutingParameters } from "./types.js";
 import { findPortFile } from "./quota-poller.js";
+
+function writeSensitiveJsonAtomic(file: string, data: unknown): void {
+  const dir = dirname(file);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
+  renameSync(tmp, file);
+}
 
 export interface GoogleProviderRoutingPayload {
   account_selection_strategy: string;
@@ -30,31 +38,40 @@ export interface ZenProviderRoutingPayload {
 /**
  * Static mapping between UnifiedRoutingMode and provider-specific native strategy/mode.
  */
+interface ModeStrategyMapping {
+  google: { account_selection_strategy: string; scheduling_mode: string };
+  openAI: string;
+}
+
+const MODE_STRATEGY_MAP: Record<UnifiedRoutingMode, ModeStrategyMapping> = {
+  "main-first": {
+    google: { account_selection_strategy: "main-first", scheduling_mode: "cache_first" },
+    openAI: "main-first",
+  },
+  "load-balancing": {
+    google: { account_selection_strategy: "round-robin", scheduling_mode: "performance_first" },
+    openAI: "sticky-balanced",
+  },
+  "latency-based": {
+    google: { account_selection_strategy: "hybrid", scheduling_mode: "balance" },
+    openAI: "sticky-balanced",
+  },
+  "cost-based": {
+    google: { account_selection_strategy: "hybrid", scheduling_mode: "balance" },
+    openAI: "sticky-balanced",
+  },
+  "usage-based": {
+    google: { account_selection_strategy: "hybrid", scheduling_mode: "balance" },
+    openAI: "sticky-balanced",
+  },
+};
+
 export function mapModeToGoogleStrategy(mode: UnifiedRoutingMode): { account_selection_strategy: string; scheduling_mode: string } {
-  switch (mode) {
-    case "main-first":
-      return { account_selection_strategy: "main-first", scheduling_mode: "cache_first" };
-    case "load-balancing":
-      return { account_selection_strategy: "round-robin", scheduling_mode: "performance_first" };
-    case "latency-based":
-      return { account_selection_strategy: "hybrid", scheduling_mode: "balance" };
-    case "cost-based":
-      return { account_selection_strategy: "hybrid", scheduling_mode: "balance" };
-    case "usage-based":
-      return { account_selection_strategy: "hybrid", scheduling_mode: "balance" };
-  }
+  return MODE_STRATEGY_MAP[mode]?.google ?? { account_selection_strategy: "main-first", scheduling_mode: "cache_first" };
 }
 
 export function mapModeToOpenAI(mode: UnifiedRoutingMode): string {
-  switch (mode) {
-    case "main-first":
-      return "main-first";
-    case "load-balancing":
-    case "latency-based":
-    case "cost-based":
-    case "usage-based":
-      return "sticky-balanced";
-  }
+  return MODE_STRATEGY_MAP[mode]?.openAI ?? "main-first";
 }
 
 /**
@@ -152,7 +169,15 @@ export async function syncUnifiedRouting(
     mCfg.router.zenRoutingMode = mapModeToOpenAI(mode) as any;
     saveConfig(mCfg, dataDir);
     if (configDir !== dataDir) {
-      try { saveConfig(mCfg, configDir); } catch {}
+      try {
+        saveConfig(mCfg, configDir);
+      } catch (err) {
+        api?.ui?.toast({
+          variant: "warning",
+          title: "Routing Warning",
+          message: `Failed to save manager config to secondary config directory: ${String(err)}`,
+        });
+      }
     }
   } catch (err) {
     api?.ui?.toast({
@@ -171,22 +196,49 @@ export async function syncUnifiedRouting(
     if (existsSync(googlePath)) {
       try {
         currentGoogle = JSON.parse(readFileSync(googlePath, "utf-8"));
-      } catch {}
+      } catch (err) {
+        api?.ui?.toast({
+          variant: "warning",
+          title: "Routing Warning",
+          message: `Malformed google.json, proceeding with default settings: ${String(err)}`,
+        });
+      }
     }
     const updatedGoogle = { ...currentGoogle, ...googlePayload };
     delete updatedGoogle.routing_mode;
-    writeFileSync(googlePath, JSON.stringify(updatedGoogle, null, 2), "utf-8");
+    writeSensitiveJsonAtomic(googlePath, updatedGoogle);
 
     const agPath = join(configDir, "antigravity.json");
     if (existsSync(agPath)) {
       try {
-        const agCur = JSON.parse(readFileSync(agPath, "utf-8"));
+        let agCur: Record<string, unknown> = {};
+        try {
+          agCur = JSON.parse(readFileSync(agPath, "utf-8"));
+        } catch (err) {
+          api?.ui?.toast({
+            variant: "warning",
+            title: "Routing Warning",
+            message: `Malformed antigravity.json, proceeding with default settings: ${String(err)}`,
+          });
+        }
         const updatedAg = { ...agCur, ...googlePayload };
         delete updatedAg.routing_mode;
-        writeFileSync(agPath, JSON.stringify(updatedAg, null, 2), "utf-8");
-      } catch {}
+        writeSensitiveJsonAtomic(agPath, updatedAg);
+      } catch (err) {
+        api?.ui?.toast({
+          variant: "error",
+          title: "Routing Error",
+          message: `Failed to write antigravity config: ${String(err)}`,
+        });
+      }
     }
-  } catch {}
+  } catch (err) {
+    api?.ui?.toast({
+      variant: "error",
+      title: "Routing Error",
+      message: `Failed to persist Google routing config: ${String(err)}`,
+    });
+  }
 
   // 3. Persist to OpenAI config (openai-auth.json)
   try {
@@ -196,11 +248,23 @@ export async function syncUnifiedRouting(
     if (existsSync(oaiPath)) {
       try {
         currentOai = JSON.parse(readFileSync(oaiPath, "utf-8"));
-      } catch {}
+      } catch (err) {
+        api?.ui?.toast({
+          variant: "warning",
+          title: "Routing Warning",
+          message: `Malformed openai-auth.json, proceeding with default settings: ${String(err)}`,
+        });
+      }
     }
     const updatedOai = { ...currentOai, ...oaiPayload };
-    writeFileSync(oaiPath, JSON.stringify(updatedOai, null, 2), "utf-8");
-  } catch {}
+    writeSensitiveJsonAtomic(oaiPath, updatedOai);
+  } catch (err) {
+    api?.ui?.toast({
+      variant: "error",
+      title: "Routing Error",
+      message: `Failed to persist OpenAI routing config: ${String(err)}`,
+    });
+  }
 
   // 4. Hot reload via silent RPC: Antigravity and OpenAI
   const googleStrategy = (translateToProvider(unifiedConfig, "google") as any).account_selection_strategy;

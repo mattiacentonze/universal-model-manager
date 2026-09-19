@@ -193,4 +193,30 @@ describe("routing flow with unified 5 modes", () => {
     expect(formatRoutingDisplay("fallback-first")).toBe("Fallback first");
     expect(formatRoutingDisplay("")).toBe("Main first");
   });
+
+  it("syncUnifiedRouting warns on malformed provider json but proceeds cleanly", async () => {
+    const cfg = loadConfig(cfgDir);
+    saveConfig(cfg, cfgDir);
+    const h = makeApi();
+
+    // Write malformed JSON to google.json, antigravity.json, and openai-auth.json
+    writeFileSync(join(cfgDir, "google.json"), "NOT_JSON{{{");
+    writeFileSync(join(cfgDir, "antigravity.json"), "NOT_JSON{{{");
+    writeFileSync(join(cfgDir, "openai-auth.json"), "NOT_JSON{{{");
+
+    await syncUnifiedRouting(h.api as never, "load-balancing");
+
+    // Warnings toasted for malformed files
+    const toastCalls = (h.api.ui as any).toast.mock.calls;
+    const warningToasts = toastCalls.filter((c: any[]) => c[0]?.variant === "warning");
+    expect(warningToasts.length).toBe(3);
+
+    // Files successfully overwritten with valid JSON
+    const savedGoogle = JSON.parse(readFileSync(join(cfgDir, "google.json"), "utf8"));
+    expect(savedGoogle.account_selection_strategy).toBe("round-robin");
+    const savedAg = JSON.parse(readFileSync(join(cfgDir, "antigravity.json"), "utf8"));
+    expect(savedAg.account_selection_strategy).toBe("round-robin");
+    const savedOai = JSON.parse(readFileSync(join(cfgDir, "openai-auth.json"), "utf8"));
+    expect(savedOai.routing.mode).toBe("sticky-balanced");
+  });
 });

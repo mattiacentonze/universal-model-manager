@@ -1,10 +1,141 @@
-// @ts-nocheck
 // Vendored from opencode-runtime-fallback 0.2.4 (MIT). Self-contained engine.
 // @bun
 import { telemetry } from "../telemetry/index.js";
+import { appendFileSync, mkdirSync, readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import { parse as parseJsonc } from "jsonc-parser";
+import type { PluginInput, Hooks } from "@opencode-ai/plugin";
+
+// types.ts
+export interface FallbackConfig {
+  enabled: boolean;
+  retry_on_errors: number[];
+  retryable_error_patterns: string[];
+  max_fallback_attempts: number;
+  cooldown_seconds: number;
+  timeout_seconds: number;
+  notify_on_fallback: boolean;
+  routing_mode: string;
+  fallback_models: string[];
+}
+
+export type FallbackConfigOverrides = Partial<FallbackConfig>;
+
+export interface FallbackState {
+  originalModel: string;
+  currentModel: string;
+  fallbackIndex: number;
+  failedModels: Map<string, number>;
+  attemptCount: number;
+  modelRetryCount: number;
+  pendingFallbackModel: string | undefined;
+}
+
+export interface FallbackPlanSuccess {
+  success: true;
+  newModel: string;
+  failedModel: string;
+  newFallbackIndex: number;
+}
+
+export interface FallbackPlanFailure {
+  success: false;
+  error: string;
+  maxAttemptsReached?: boolean;
+}
+
+export type FallbackPlan = FallbackPlanSuccess | FallbackPlanFailure;
+
+export interface AgentConfig {
+  model?: string;
+  fallback_models?: string[] | string;
+  [key: string]: unknown;
+}
+
+export type AgentConfigs = Record<string, AgentConfig>;
+
+export interface EngineDeps {
+  ctx: PluginInput;
+  readonly config: FallbackConfig;
+  readonly agentConfigs: AgentConfigs | undefined;
+  globalFallbackModels: string[];
+  sessionStates: Map<string, FallbackState>;
+  sessionLastAccess: Map<string, number>;
+  sessionRetryInFlight: Set<string>;
+  sessionAwaitingFallbackResult: Set<string>;
+  sessionFallbackTimeouts: Map<string, ReturnType<typeof setTimeout>>;
+  sessionFirstTokenReceived: Map<string, boolean>;
+  sessionSelfAbortTimestamp: Map<string, number>;
+  sessionParentID: Map<string, string | null>;
+  sessionIdleResolvers: Map<string, (() => void)[]>;
+  sessionLastMessageTime: Map<string, number>;
+  sessionLastMessageModel: Map<string, string>;
+  sessionCompactionInFlight: Set<string>;
+}
+
+export interface ReplayPart {
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+export interface ReplayResultSuccess {
+  success: true;
+  tier: number;
+  sentParts: ReplayPart[];
+  droppedTypes: string[];
+}
+
+export interface ReplayResultFailure {
+  success: false;
+  error: string;
+}
+
+export type ReplayResult = ReplayResultSuccess | ReplayResultFailure;
+
+export interface AutoRetryHelpers {
+  getParentSessionID: (sessionID: string) => Promise<string | null>;
+  abortSessionRequest: (sessionID: string, source: string) => Promise<void>;
+  clearSessionFallbackTimeout: (sessionID: string) => void;
+  scheduleSessionFallbackTimeout: (sessionID: string, resolvedAgent: string | undefined) => void;
+  autoRetryWithFallback: (
+    sessionID: string,
+    newModel: string,
+    resolvedAgent: string | undefined,
+    source: string,
+    plan: FallbackPlanSuccess | undefined
+  ) => Promise<boolean>;
+  resolveAgentForSessionFromContext: (sessionID: string, eventAgent: string | undefined) => Promise<string | undefined>;
+  cleanupStaleSessions: () => void;
+  findFirstAgentModel: () => string | undefined;
+  getOrCreateFallbackState: (
+    sessionID: string,
+    options?: {
+      preferredModel?: string;
+      resolvedAgent?: string;
+      allowFirstAgentFallback?: boolean;
+    }
+  ) => FallbackState | undefined;
+  notifyFallback: (options: {
+    title?: string;
+    message?: string;
+    newModel: string;
+    attemptCount?: number;
+    totalFallbackModels?: number;
+    prefixMessage?: string;
+    immediate?: boolean;
+  }) => void;
+  notifyExhausted: (options: {
+    totalFallbackModels: number;
+    attemptCount?: number;
+  }) => Promise<void>;
+  notifyRecovered: (model: string) => void;
+}
+
 // constants.ts
-var PLUGIN_NAME = "opencode-fallback";
-var DEFAULT_CONFIG = {
+const PLUGIN_NAME = "opencode-fallback";
+const DEFAULT_CONFIG: FallbackConfig = {
   enabled: true,
   retry_on_errors: [401, 402, 429, 500, 502, 503, 504],
   retryable_error_patterns: [],
@@ -15,7 +146,7 @@ var DEFAULT_CONFIG = {
   routing_mode: "main-first",
   fallback_models: []
 };
-var RETRYABLE_ERROR_PATTERNS = [
+const RETRYABLE_ERROR_PATTERNS: RegExp[] = [
   /rate.?limit/i,
   /too.?many.?requests/i,
   /quota.?exceeded/i,
@@ -34,31 +165,27 @@ var RETRYABLE_ERROR_PATTERNS = [
 ];
 
 // logger.ts
-import { appendFileSync, mkdirSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-var LOG_FILE = join(homedir(), ".config", "opencode", "opencode-fallback.log");
+const LOG_FILE = join(homedir(), ".config", "opencode", "opencode-fallback.log");
 try {
   mkdirSync(join(homedir(), ".config", "opencode"), { recursive: true });
 } catch {}
-function writeToFile(level, message, context) {
+function writeToFile(level: string, message: string, context?: unknown): void {
   const timestamp = new Date().toISOString();
   const contextStr = context ? ` ${JSON.stringify(context)}` : "";
-  const logLine = `[${timestamp}] [${level}] [${PLUGIN_NAME}] ${message}${contextStr}
-`;
+  const logLine = `[${timestamp}] [${level}] [${PLUGIN_NAME}] ${message}${contextStr}\n`;
   try {
     appendFileSync(LOG_FILE, logLine);
   } catch {}
 }
-var DEBUG_MODE = false;
-function logInfo(message, context) {
+const DEBUG_MODE = false;
+function logInfo(message: string, context?: unknown): void {
   if (DEBUG_MODE) {
     const contextStr = context ? ` ${JSON.stringify(context)}` : "";
     console.log(`[${PLUGIN_NAME}] ${message}${contextStr}`);
   }
   writeToFile("INFO", message, context);
 }
-function logError(message, context) {
+function logError(message: string, context?: unknown): void {
   if (DEBUG_MODE) {
     const contextStr = context ? ` ${JSON.stringify(context)}` : "";
     console.error(`[${PLUGIN_NAME}] ${message}${contextStr}`);
@@ -67,21 +194,21 @@ function logError(message, context) {
 }
 
 // config-reader.ts
-var SESSION_ID_NOISE_WORDS = new Set(["ses", "work", "task", "session"]);
-function isRecord(value) {
+const SESSION_ID_NOISE_WORDS = new Set(["ses", "work", "task", "session"]);
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function normalizeFallbackModelsField(value) {
+function normalizeFallbackModelsField(value: unknown): string[] {
   if (!value)
     return [];
   if (typeof value === "string")
     return [value];
   if (Array.isArray(value)) {
-    return value.filter((item) => typeof item === "string");
+    return value.filter((item): item is string => typeof item === "string");
   }
   return [];
 }
-function readFallbackModels(agentName, agents) {
+function readFallbackModels(agentName: string, agents?: AgentConfigs): string[] {
   if (!agents)
     return [];
   const agentConfig = agents[agentName];
@@ -89,7 +216,7 @@ function readFallbackModels(agentName, agents) {
     return [];
   return normalizeFallbackModelsField(agentConfig.fallback_models);
 }
-function resolveAgentForSession(sessionID, eventAgent) {
+function resolveAgentForSession(sessionID: string, eventAgent?: string): string | undefined {
   if (eventAgent && eventAgent.trim().length > 0) {
     return eventAgent.trim().toLowerCase();
   }
@@ -101,9 +228,14 @@ function resolveAgentForSession(sessionID, eventAgent) {
       return candidate;
     }
   }
-  return;
+  return undefined;
 }
-function getFallbackModelsForSession(sessionID, eventAgent, agents, globalFallbackModels) {
+function getFallbackModelsForSession(
+  sessionID: string,
+  eventAgent: string | undefined,
+  agents: AgentConfigs | undefined,
+  globalFallbackModels: string[]
+): string[] {
   const resolvedAgent = resolveAgentForSession(sessionID, eventAgent);
   if (resolvedAgent && agents) {
     const models = readFallbackModels(resolvedAgent, agents);
@@ -126,27 +258,32 @@ function getFallbackModelsForSession(sessionID, eventAgent, agents, globalFallba
 
 // fallback-state.ts
 const MAX_MODEL_RETRIES = 5;
-function createFallbackState(originalModel) {
+function createFallbackState(originalModel: string): FallbackState {
   return {
     originalModel,
     currentModel: originalModel,
     fallbackIndex: -1,
-    failedModels: new Map,
+    failedModels: new Map(),
     attemptCount: 0,
     modelRetryCount: 0,
     pendingFallbackModel: undefined
   };
 }
-function isModelInCooldown(model, state, cooldownSeconds) {
+function isModelInCooldown(model: string, state: FallbackState, cooldownSeconds: number): boolean {
   const failedAt = state.failedModels.get(model);
   if (failedAt === undefined)
     return false;
   const cooldownMs = cooldownSeconds * 1000;
   return Date.now() - failedAt < cooldownMs;
 }
-function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routingMode = "main-first") {
-  const scan = (from, to) => {
-    for (let i = from;i < to; i++) {
+function findNextAvailableFallback(
+  state: FallbackState,
+  fallbackModels: string[],
+  cooldownSeconds: number,
+  routingMode = "main-first"
+): string | undefined {
+  const scan = (from: number, to: number): string | undefined => {
+    for (let i = from; i < to; i++) {
       const candidate = fallbackModels[i];
       if (candidate === state.currentModel) {
         logInfo(`Skipping fallback model identical to current: ${candidate} (index ${i})`);
@@ -161,10 +298,7 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
   };
   const start = state.fallbackIndex + 1;
   if (routingMode === "balanced" || routingMode === "sticky-balanced" || routingMode === "load-balancing" || routingMode === "usage-based") {
-    // Balanced / load-balancing / usage-based: pick the healthiest available candidate not in cooldown.
-    // Prefers models that haven't failed yet in this session; among failed models,
-    // prefers the one whose failure was furthest in the past (most recovery time).
-    const available = [];
+    const available: { candidate: string; lastFailed: number; index: number }[] = [];
     for (let i = 0; i < fallbackModels.length; i++) {
       const candidate = fallbackModels[i];
       if (candidate === state.currentModel) continue;
@@ -185,7 +319,7 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
     return undefined;
   }
   if (routingMode === "latency-based") {
-    const available = [];
+    const available: { candidate: string; avgLat: number; lastFailed: number; index: number }[] = [];
     for (let i = 0; i < fallbackModels.length; i++) {
       const candidate = fallbackModels[i];
       if (candidate === state.currentModel) continue;
@@ -206,7 +340,7 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
     return undefined;
   }
   if (routingMode === "cost-based") {
-    const available = [];
+    const available: { candidate: string; cost: number; lastFailed: number; index: number }[] = [];
     for (let i = 0; i < fallbackModels.length; i++) {
       const candidate = fallbackModels[i];
       if (candidate === state.currentModel) continue;
@@ -227,12 +361,9 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
     return undefined;
   }
   if (routingMode === "sticky") {
-    // Stay on the current model; only move forward, never wrap back to the primary.
     return scan(start, fallbackModels.length);
   }
   if (routingMode === "fallback-first") {
-    // Prefer secondary models and keep the primary in reserve: scan forward,
-    // then wrap to the secondaries (index >= 1) before the primary (index 0).
     const forward = scan(start, fallbackModels.length);
     if (forward !== undefined) {
       return forward;
@@ -243,9 +374,6 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
     }
     return scan(0, 1);
   }
-  // main-first / round-robin: wrap around and retry the whole order from the
-  // start, because an earlier model (e.g. the primary) may have reloaded or
-  // come out of cooldown. Bounded by max_fallback_attempts to avoid a loop.
   const forward = scan(start, fallbackModels.length);
   if (forward !== undefined) {
     return forward;
@@ -253,7 +381,7 @@ function findNextAvailableFallback(state, fallbackModels, cooldownSeconds, routi
   logInfo(`No forward fallback available; wrapping around to retry the whole order`);
   return scan(0, start);
 }
-function applyFallbackPlan(state, plan, pendingFallbackModel) {
+function applyFallbackPlan(state: FallbackState, plan: FallbackPlanSuccess, pendingFallbackModel?: string): void {
   state.fallbackIndex = plan.newFallbackIndex;
   state.failedModels.set(plan.failedModel, Date.now());
   state.attemptCount++;
@@ -261,7 +389,12 @@ function applyFallbackPlan(state, plan, pendingFallbackModel) {
   state.modelRetryCount = 0;
   state.pendingFallbackModel = pendingFallbackModel;
 }
-function planFallback(sessionID, state, fallbackModels, config) {
+function planFallback(
+  sessionID: string,
+  state: FallbackState,
+  fallbackModels: string[],
+  config: FallbackConfig
+): FallbackPlan {
   if (state.attemptCount >= config.max_fallback_attempts) {
     logInfo(`Max fallback attempts reached for session ${sessionID} (${state.attemptCount})`);
     return {
@@ -286,14 +419,14 @@ function planFallback(sessionID, state, fallbackModels, config) {
     newFallbackIndex: fallbackModels.indexOf(nextModel)
   };
 }
-function commitFallback(state, plan) {
+function commitFallback(state: FallbackState, plan: FallbackPlanSuccess): boolean {
   if (state.currentModel !== plan.failedModel) {
     return false;
   }
   applyFallbackPlan(state, plan);
   return true;
 }
-function recoverToOriginal(state, cooldownSeconds) {
+function recoverToOriginal(state: FallbackState, cooldownSeconds: number): boolean {
   if (state.currentModel === state.originalModel)
     return false;
   if (isModelInCooldown(state.originalModel, state, cooldownSeconds))
@@ -307,8 +440,8 @@ function recoverToOriginal(state, cooldownSeconds) {
 }
 
 // message-replay.ts
-var TIER_2_TYPES = new Set(["text", "image"]);
-function filterPartsByTier(parts, tier) {
+const TIER_2_TYPES = new Set(["text", "image"]);
+function filterPartsByTier(parts: ReplayPart[], tier: number): ReplayPart[] {
   switch (tier) {
     case 1:
       return parts;
@@ -316,14 +449,19 @@ function filterPartsByTier(parts, tier) {
       return parts.filter((p) => TIER_2_TYPES.has(p.type));
     case 3:
       return parts.filter((p) => p.type === "text");
+    default:
+      return parts;
   }
 }
-async function replayWithDegradation(allParts, sendFn) {
+async function replayWithDegradation(
+  allParts: ReplayPart[],
+  sendFn: (parts: ReplayPart[]) => Promise<void>
+): Promise<ReplayResult> {
   if (allParts.length === 0) {
     return { success: false, error: "No parts to replay" };
   }
   const tiers = [1, 2, 3];
-  let lastError;
+  let lastError: unknown;
   let previousLength = -1;
   for (const tier of tiers) {
     const filtered = filterPartsByTier(allParts, tier);
@@ -354,13 +492,13 @@ async function replayWithDegradation(allParts, sendFn) {
 }
 
 // auto-retry.ts
-var SESSION_TTL_MS = 30 * 60 * 1000;
-var POST_ABORT_DELAY_MS = 150;
-function summarizeParts(parts) {
+const SESSION_TTL_MS = 30 * 60 * 1000;
+const POST_ABORT_DELAY_MS = 150;
+function summarizeParts(parts?: ReplayPart[]): { count: number; types: string[]; textChars: number; hasToolCall: boolean } {
   if (!parts || parts.length === 0) {
     return { count: 0, types: [], textChars: 0, hasToolCall: false };
   }
-  const typeSet = new Set;
+  const typeSet = new Set<string>();
   let textChars = 0;
   let hasToolCall = false;
   for (const part of parts) {
@@ -380,7 +518,7 @@ function summarizeParts(parts) {
     hasToolCall
   };
 }
-function createAutoRetryHelpers(deps) {
+function createAutoRetryHelpers(deps: EngineDeps): AutoRetryHelpers {
   const {
     ctx,
     config,
@@ -390,12 +528,118 @@ function createAutoRetryHelpers(deps) {
     sessionAwaitingFallbackResult,
     sessionFallbackTimeouts
   } = deps;
-  const getParentSessionID = async (sessionID) => {
+
+  const findFirstAgentModel = (): string | undefined => {
+    if (!deps.agentConfigs)
+      return undefined;
+    for (const agentName of Object.keys(deps.agentConfigs)) {
+      const agentConfig = deps.agentConfigs[agentName];
+      const model = agentConfig?.model;
+      if (model)
+        return model;
+    }
+    return undefined;
+  };
+
+  const getOrCreateFallbackState = (
+    sessionID: string,
+    options?: {
+      preferredModel?: string;
+      resolvedAgent?: string;
+      allowFirstAgentFallback?: boolean;
+    }
+  ): FallbackState | undefined => {
+    let state = sessionStates.get(sessionID);
+    if (!state) {
+      let initialModel = options?.preferredModel;
+      if (!initialModel && options?.resolvedAgent && deps.agentConfigs) {
+        const agentConfig = deps.agentConfigs[options.resolvedAgent];
+        initialModel = agentConfig?.model;
+      }
+      if (!initialModel && options?.allowFirstAgentFallback) {
+        initialModel = findFirstAgentModel();
+      }
+      if (!initialModel) {
+        return undefined;
+      }
+      state = createFallbackState(initialModel);
+      sessionStates.set(sessionID, state);
+    }
+    sessionLastAccess.set(sessionID, Date.now());
+    return state;
+  };
+
+  const notifyFallback = (options: {
+    title?: string;
+    message?: string;
+    newModel: string;
+    attemptCount?: number;
+    totalFallbackModels?: number;
+    prefixMessage?: string;
+    immediate?: boolean;
+  }): void => {
+    if (!config.notify_on_fallback) return;
+    const modelName = options.newModel.split("/").pop() || options.newModel;
+    let message = options.message;
+    if (!message) {
+      if (options.prefixMessage) {
+        const suffix = options.attemptCount !== undefined && options.totalFallbackModels !== undefined
+          ? ` (attempt ${options.attemptCount} of ${options.totalFallbackModels})`
+          : options.immediate
+          ? " (immediate fallback)"
+          : "";
+        message = `${options.prefixMessage} -> ${modelName}${suffix}`;
+      } else if (options.attemptCount !== undefined && options.totalFallbackModels !== undefined) {
+        message = `Switching to ${modelName} (attempt ${options.attemptCount} of ${options.totalFallbackModels})`;
+      } else {
+        message = `Switching to ${modelName} for next request`;
+      }
+    }
+    ctx.client.tui.showToast({
+      body: {
+        title: options.title || "Model Fallback",
+        message,
+        variant: "warning",
+        duration: 5000
+      }
+    }).catch(() => {});
+  };
+
+  const notifyExhausted = async (options: {
+    totalFallbackModels: number;
+    attemptCount?: number;
+  }): Promise<void> => {
+    if (!config.notify_on_fallback) return;
+    const attemptsSuffix = options.attemptCount !== undefined ? ` after ${options.attemptCount} attempts` : "";
+    await ctx.client.tui.showToast({
+      body: {
+        title: "All Fallbacks Exhausted",
+        variant: "error",
+        duration: 8000,
+        message: `All ${options.totalFallbackModels} fallback models exhausted${attemptsSuffix}`
+      }
+    }).catch(() => {});
+  };
+
+  const notifyRecovered = (model: string): void => {
+    if (!config.notify_on_fallback) return;
+    const modelName = model.split("/").pop() || model;
+    ctx.client.tui.showToast({
+      body: {
+        title: "Model Recovered",
+        message: `Recovered to ${modelName}`,
+        variant: "info",
+        duration: 3000
+      }
+    }).catch(() => {});
+  };
+
+  const getParentSessionID = async (sessionID: string): Promise<string | null> => {
     const cached = deps.sessionParentID.get(sessionID);
     if (cached !== undefined)
       return cached;
     try {
-      const sessionInfo = await ctx.client.session.get({ path: { id: sessionID } });
+      const sessionInfo: any = await ctx.client.session.get({ path: { id: sessionID } });
       const sessionData = sessionInfo?.data ?? sessionInfo;
       const parentID = typeof sessionData?.parentID === "string" && sessionData.parentID.length > 0 ? sessionData.parentID : null;
       deps.sessionParentID.set(sessionID, parentID);
@@ -408,7 +652,7 @@ function createAutoRetryHelpers(deps) {
       return null;
     }
   };
-  const abortSessionRequest = async (sessionID, source) => {
+  const abortSessionRequest = async (sessionID: string, source: string): Promise<void> => {
     try {
       await ctx.client.session.abort({ path: { id: sessionID } });
       deps.sessionSelfAbortTimestamp.set(sessionID, Date.now());
@@ -420,14 +664,14 @@ function createAutoRetryHelpers(deps) {
       });
     }
   };
-  const clearSessionFallbackTimeout = (sessionID) => {
+  const clearSessionFallbackTimeout = (sessionID: string): void => {
     const timer = sessionFallbackTimeouts.get(sessionID);
     if (timer) {
       clearTimeout(timer);
       sessionFallbackTimeouts.delete(sessionID);
     }
   };
-  const scheduleSessionFallbackTimeout = (sessionID, resolvedAgent) => {
+  const scheduleSessionFallbackTimeout = (sessionID: string, resolvedAgent: string | undefined): void => {
     clearSessionFallbackTimeout(sessionID);
     const timeoutMs = config.timeout_seconds * 1000;
     if (timeoutMs <= 0)
@@ -472,7 +716,13 @@ function createAutoRetryHelpers(deps) {
     }, timeoutMs);
     sessionFallbackTimeouts.set(sessionID, timer);
   };
-  const autoRetryWithFallback = async (sessionID, newModel, resolvedAgent, source, plan) => {
+  const autoRetryWithFallback = async (
+    sessionID: string,
+    newModel: string,
+    resolvedAgent: string | undefined,
+    source: string,
+    plan: FallbackPlanSuccess | undefined
+  ): Promise<boolean> => {
     let deferredToOtherHandler = false;
     const preCheckState = sessionStates.get(sessionID);
     if (plan) {
@@ -525,17 +775,17 @@ function createAutoRetryHelpers(deps) {
         });
         const remainingMs = Math.max(0, POST_ABORT_DELAY_MS - msSinceAbort);
         if (remainingMs > 0) {
-          await new Promise((resolve) => setTimeout(() => resolve(), remainingMs));
+          await new Promise<void>((resolve) => setTimeout(() => resolve(), remainingMs));
         }
       } else if (callerAlreadyAborted) {
         logInfo(`Caller already aborted (${source}), waiting for propagation`, {
           sessionID
         });
-        await new Promise((resolve) => setTimeout(() => resolve(), POST_ABORT_DELAY_MS));
+        await new Promise<void>((resolve) => setTimeout(() => resolve(), POST_ABORT_DELAY_MS));
       }
     } else {
       await abortSessionRequest(sessionID, `pre-fallback.${source}`);
-      await new Promise((resolve) => setTimeout(() => resolve(), POST_ABORT_DELAY_MS));
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), POST_ABORT_DELAY_MS));
     }
     deps.sessionFirstTokenReceived.set(sessionID, false);
     let retryDispatched = false;
@@ -561,21 +811,21 @@ function createAutoRetryHelpers(deps) {
         } catch {
           logError(`Failed to abort session for compaction fallback (${source})`, { sessionID });
         }
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
         try {
-          const messagesResp = await ctx.client.session.messages({
+          const messagesResp: any = await ctx.client.session.messages({
             path: { id: sessionID },
             query: { directory: ctx.directory }
           });
-          const msgs = messagesResp.data ?? [];
-          const deleteIDs = [];
-          for (let i = msgs.length - 1;i >= 0; i--) {
+          const msgs: any[] = messagesResp.data ?? [];
+          const deleteIDs: string[] = [];
+          for (let i = msgs.length - 1; i >= 0; i--) {
             const msg = msgs[i];
             const msgRole = msg.info?.role;
             const msgError = msg.info?.error;
             const msgID = msg.info?.id;
             const parts = msg.parts ?? [];
-            const isCompactionMsg = parts.length > 0 && parts.every((p) => p.type === "compaction");
+            const isCompactionMsg = parts.length > 0 && parts.every((p: any) => p.type === "compaction");
             if (!msgID)
               continue;
             if (msgRole === "assistant" && msgError) {
@@ -587,7 +837,7 @@ function createAutoRetryHelpers(deps) {
               break;
             }
           }
-          const rawClient = ctx.client.session?._client;
+          const rawClient = (ctx.client.session as any)?._client;
           if (rawClient && deleteIDs.length > 0) {
             for (const msgID of deleteIDs) {
               logInfo(`Deleting compaction message (${source})`, {
@@ -623,7 +873,7 @@ function createAutoRetryHelpers(deps) {
             error: String(msgErr)
           });
         }
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
         try {
           if (sessionAwaitingFallbackResult.has(sessionID)) {
             logInfo(`Skipping duplicate compaction summarize (${source})`, { sessionID });
@@ -719,23 +969,23 @@ function createAutoRetryHelpers(deps) {
           return false;
         }
       }
-      const messagesResp = await ctx.client.session.messages({
+      const messagesResp: any = await ctx.client.session.messages({
         path: { id: sessionID },
         query: { directory: ctx.directory }
       });
-      const msgs = messagesResp.data;
+      const msgs: any[] = messagesResp.data;
       if (!msgs || msgs.length === 0) {
         logError(`No messages found in session for auto-retry (${source})`, { sessionID });
       }
-      let lastUserPartsRaw;
-      let lastNonAssistantPartsRaw;
-      for (let i = (msgs?.length ?? 0) - 1;i >= 0; i--) {
+      let lastUserPartsRaw: any[] | undefined;
+      let lastNonAssistantPartsRaw: any[] | undefined;
+      for (let i = (msgs?.length ?? 0) - 1; i >= 0; i--) {
         const m = msgs?.[i];
         const role = (m?.info?.role ?? m?.role ?? "").toLowerCase();
         const parts = m?.parts ?? m?.info?.parts;
         if (!parts || parts.length === 0)
           continue;
-        const hasOnlyCompactionParts = parts.every((p) => p.type === "compaction");
+        const hasOnlyCompactionParts = parts.every((p: any) => p.type === "compaction");
         if (hasOnlyCompactionParts)
           continue;
         if (!lastNonAssistantPartsRaw && role !== "assistant") {
@@ -775,7 +1025,7 @@ function createAutoRetryHelpers(deps) {
           agent: resolvedAgent,
           replaySource
         });
-        const allParts = replayPartsRaw.filter((p) => typeof p.type === "string" && p.type !== "compaction");
+        const allParts: ReplayPart[] = replayPartsRaw.filter((p: any) => typeof p.type === "string" && p.type !== "compaction");
         logInfo(`Prepared replay payload (${source})`, {
           sessionID,
           model: newModel,
@@ -784,7 +1034,7 @@ function createAutoRetryHelpers(deps) {
           payload: summarizeParts(allParts)
         });
         if (allParts.length > 0) {
-          const sendFn = async (parts) => {
+          const sendFn = async (parts: ReplayPart[]): Promise<void> => {
             logInfo(`Dispatching fallback replay (${source})`, {
               sessionID,
               model: newModel,
@@ -794,9 +1044,9 @@ function createAutoRetryHelpers(deps) {
             await ctx.client.session.promptAsync({
               path: { id: sessionID },
               body: {
-                ...resolvedAgent ? { agent: resolvedAgent } : {},
+                ...(resolvedAgent ? { agent: resolvedAgent } : {}),
                 model: fallbackModelObj,
-                parts
+                parts: parts as any
               },
               query: { directory: ctx.directory }
             });
@@ -889,19 +1139,19 @@ function createAutoRetryHelpers(deps) {
     }
     return retryDispatched;
   };
-  const resolveAgentForSessionFromContext = async (sessionID, eventAgent) => {
+  const resolveAgentForSessionFromContext = async (sessionID: string, eventAgent: string | undefined): Promise<string | undefined> => {
     const resolved = resolveAgentForSession(sessionID, eventAgent);
     if (resolved)
       return resolved;
     try {
-      const messagesResp = await ctx.client.session.messages({
+      const messagesResp: any = await ctx.client.session.messages({
         path: { id: sessionID },
         query: { directory: ctx.directory }
       });
-      const msgs = messagesResp.data;
+      const msgs: any[] = messagesResp.data;
       if (!msgs || msgs.length === 0)
-        return;
-      for (let i = msgs.length - 1;i >= 0; i--) {
+        return undefined;
+      for (let i = msgs.length - 1; i >= 0; i--) {
         const info = msgs[i]?.info;
         const infoAgent = typeof info?.agent === "string" ? info.agent : undefined;
         if (infoAgent && infoAgent.trim().length > 0) {
@@ -912,7 +1162,7 @@ function createAutoRetryHelpers(deps) {
       logError("Failed to resolve agent from messages", { sessionID });
     }
     try {
-      const sessionInfo = await ctx.client.session.get({ path: { id: sessionID } });
+      const sessionInfo: any = await ctx.client.session.get({ path: { id: sessionID } });
       const sessionData = sessionInfo?.data ?? sessionInfo;
       const sdkAgent = typeof sessionData?.agent === "string" ? sessionData.agent : undefined;
       if (sdkAgent && sdkAgent.trim().length > 0) {
@@ -923,9 +1173,9 @@ function createAutoRetryHelpers(deps) {
     } catch {
       logError("Failed to resolve agent from session.get", { sessionID });
     }
-    return;
+    return undefined;
   };
-  const cleanupStaleSessions = () => {
+  const cleanupStaleSessions = (): void => {
     const now = Date.now();
     let cleanedCount = 0;
     for (const [sessionID, lastAccess] of sessionLastAccess.entries()) {
@@ -955,23 +1205,28 @@ function createAutoRetryHelpers(deps) {
     scheduleSessionFallbackTimeout,
     autoRetryWithFallback,
     resolveAgentForSessionFromContext,
-    cleanupStaleSessions
+    cleanupStaleSessions,
+    findFirstAgentModel,
+    getOrCreateFallbackState,
+    notifyFallback,
+    notifyExhausted,
+    notifyRecovered
   };
 }
 
 // error-classifier.ts
-function getObjectRecord(value) {
-  return value && typeof value === "object" ? value : undefined;
+function getObjectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
-function normalizeMessage(value) {
+function normalizeMessage(value: string): string {
   return value.trim().length === 0 ? "" : value.toLowerCase();
 }
-function getErrorMessage(error) {
+function getErrorMessage(error: unknown): string {
   if (!error)
     return "";
   if (typeof error === "string")
     return normalizeMessage(error);
-  const errorObj = error;
+  const errorObj = error as Record<string, any>;
   const paths = [
     errorObj.data?.error,
     errorObj.data,
@@ -993,10 +1248,10 @@ function getErrorMessage(error) {
     return "";
   }
 }
-function extractStatusCode(error, retryOnErrors) {
+function extractStatusCode(error: unknown, retryOnErrors?: number[]): number | undefined {
   if (!error)
-    return;
-  const errorObj = error;
+    return undefined;
+  const errorObj = error as Record<string, any>;
   const statusCode = errorObj.statusCode ?? errorObj.status ?? errorObj.data?.statusCode;
   if (typeof statusCode === "number") {
     return statusCode;
@@ -1015,12 +1270,12 @@ function extractStatusCode(error, retryOnErrors) {
   if (extracted) {
     return parseInt(extracted, 10);
   }
-  return;
+  return undefined;
 }
-function extractErrorName(error) {
+function extractErrorName(error: unknown): string | undefined {
   if (!error || typeof error !== "object")
-    return;
-  const errorObj = error;
+    return undefined;
+  const errorObj = error as Record<string, any>;
   const directName = errorObj.name;
   if (typeof directName === "string" && directName.length > 0) {
     return directName;
@@ -1035,9 +1290,9 @@ function extractErrorName(error) {
   if (typeof dataErrorName === "string" && dataErrorName.length > 0) {
     return dataErrorName;
   }
-  return;
+  return undefined;
 }
-function classifyErrorType(error) {
+function classifyErrorType(error: unknown): string | undefined {
   const message = getErrorMessage(error);
   const errorName = extractErrorName(error)?.toLowerCase();
   if (errorName?.includes("loadapi") || /api.?key.?is.?missing/i.test(message) && /environment variable/i.test(message) || /(?:x-api-key|api key).*(?:is required|missing|required)/i.test(message) || /(?:missing|required).*(?:x-api-key|api key)/i.test(message)) {
@@ -1052,16 +1307,16 @@ function classifyErrorType(error) {
   if (/model\s+(?:is\s+)?not\s+(?:found|supported|available)/i.test(message) || /the model .+ does not exist/i.test(message)) {
     return "model_not_found";
   }
-  return;
+  return undefined;
 }
-var AUTO_RETRY_PATTERNS = [
-  (combined) => /retrying\s+in/i.test(combined),
-  (combined) => /(?:too\s+many\s+requests|quota\s*exceeded|usage\s+limit|rate\s+limit|limit\s+reached)/i.test(combined)
+const AUTO_RETRY_PATTERNS = [
+  (combined: string) => /retrying\s+in/i.test(combined),
+  (combined: string) => /(?:too\s+many\s+requests|quota\s*exceeded|usage\s+limit|rate\s+limit|limit\s+reached)/i.test(combined)
 ];
-function extractAutoRetrySignal(info) {
+function extractAutoRetrySignal(info: any): { signal: string } | undefined {
   if (!info)
-    return;
-  const candidates = [];
+    return undefined;
+  const candidates: string[] = [];
   const directStatus = info.status;
   if (typeof directStatus === "string")
     candidates.push(directStatus);
@@ -1074,33 +1329,30 @@ function extractAutoRetrySignal(info) {
   const details = info.details;
   if (typeof details === "string")
     candidates.push(details);
-  const combined = candidates.join(`
-`);
+  const combined = candidates.join("\n");
   if (!combined)
-    return;
+    return undefined;
   const isAutoRetry = AUTO_RETRY_PATTERNS.every((test) => test(combined));
   if (isAutoRetry) {
     return { signal: combined };
   }
-  return;
+  return undefined;
 }
-function containsErrorContent(parts) {
+function containsErrorContent(parts?: any[]): { hasError: boolean; errorMessage?: string } {
   if (!parts || parts.length === 0)
     return { hasError: false };
   const errorParts = parts.filter((p) => p.type === "error");
   if (errorParts.length > 0) {
-    const errorMessages = errorParts.map((p) => p.text).filter((text) => typeof text === "string");
-    const errorMessage = errorMessages.length > 0 ? errorMessages.join(`
-`) : undefined;
+    const errorMessages = errorParts.map((p) => p.text).filter((text): text is string => typeof text === "string");
+    const errorMessage = errorMessages.length > 0 ? errorMessages.join("\n") : undefined;
     return { hasError: true, errorMessage };
   }
   return { hasError: false };
 }
-function detectErrorInTextParts(parts) {
+function detectErrorInTextParts(parts?: any[]): { hasError: boolean; errorType?: string; errorMessage?: string } {
   if (!parts || parts.length === 0)
     return { hasError: false };
-  const textContent = parts.filter((p) => p.type === "text" && typeof p.text === "string" && p.text.length > 0).map((p) => p.text).join(`
-`);
+  const textContent = parts.filter((p) => p.type === "text" && typeof p.text === "string" && p.text.length > 0).map((p) => p.text).join("\n");
   if (!textContent)
     return { hasError: false };
   const errorType = classifyErrorType({ message: textContent, name: "TextContent" });
@@ -1109,18 +1361,17 @@ function detectErrorInTextParts(parts) {
   }
   return { hasError: false };
 }
-function extractErrorContentFromParts(parts) {
+function extractErrorContentFromParts(parts?: any[]): { hasError: boolean; errorMessage?: string } {
   if (!parts || parts.length === 0)
     return { hasError: false };
   const errorParts = parts.filter((p) => p.type === "error" && typeof p.text === "string" && p.text.length > 0);
   if (errorParts.length > 0) {
-    const errorMessage = errorParts.map((p) => p.text).join(`
-`);
+    const errorMessage = errorParts.map((p) => p.text).join("\n");
     return { hasError: true, errorMessage };
   }
   return { hasError: false };
 }
-function isRetryableError(error, retryOnErrors, userPatterns) {
+function isRetryableError(error: unknown, retryOnErrors: number[], userPatterns: string[]): boolean {
   const statusCode = extractStatusCode(error, retryOnErrors);
   const message = getErrorMessage(error);
   const errorType = classifyErrorType(error);
@@ -1149,7 +1400,10 @@ function isRetryableError(error, retryOnErrors, userPatterns) {
 }
 
 // event-handler.ts
-function createEventHandler(deps, helpers) {
+function createEventHandler(deps: EngineDeps, helpers: AutoRetryHelpers): {
+  handleEvent: (args: { event: any }) => Promise<void>;
+  handleActivity: (sessionID: string, activityModel?: string) => Promise<void>;
+} {
   const {
     config,
     sessionStates,
@@ -1158,7 +1412,7 @@ function createEventHandler(deps, helpers) {
     sessionAwaitingFallbackResult,
     sessionFallbackTimeouts
   } = deps;
-  const handleActivity = async (sessionID, activityModel) => {
+  const handleActivity = async (sessionID: string, activityModel?: string): Promise<void> => {
     if (activityModel && sessionAwaitingFallbackResult.has(sessionID)) {
       const state = sessionStates.get(sessionID);
       if (state && state.failedModels.has(activityModel)) {
@@ -1193,7 +1447,7 @@ function createEventHandler(deps, helpers) {
       });
     }
   };
-  const handleSessionCreated = (props) => {
+  const handleSessionCreated = (props: any): void => {
     const sessionInfo = props?.info;
     const sessionID = sessionInfo?.id;
     if (!sessionID)
@@ -1204,7 +1458,7 @@ function createEventHandler(deps, helpers) {
     }
     logInfo("Session created, state will be created on-demand", { sessionID });
   };
-  const handleSessionDeleted = (props) => {
+  const handleSessionDeleted = (props: any): void => {
     const sessionInfo = props?.info;
     const sessionID = sessionInfo?.id;
     if (sessionID) {
@@ -1223,7 +1477,7 @@ function createEventHandler(deps, helpers) {
       helpers.clearSessionFallbackTimeout(sessionID);
     }
   };
-  const handleSessionStop = async (props) => {
+  const handleSessionStop = async (props: any): Promise<void> => {
     const sessionID = props?.sessionID;
     if (!sessionID)
       return;
@@ -1241,7 +1495,7 @@ function createEventHandler(deps, helpers) {
     }
     logInfo("Cleared fallback retry state on session.stop", { sessionID });
   };
-  const handleSessionIdle = async (props) => {
+  const handleSessionIdle = async (props: any): Promise<void> => {
     const sessionID = props?.sessionID;
     if (!sessionID)
       return;
@@ -1327,7 +1581,14 @@ function createEventHandler(deps, helpers) {
       logInfo("Cleared fallback timeout after session completion", { sessionID });
     }
   };
-  const handleStayOnFallback = async (sessionID, state, fallbackModels, resolvedAgent, status, source) => {
+  const handleStayOnFallback = async (
+    sessionID: string,
+    state: FallbackState,
+    fallbackModels: string[],
+    resolvedAgent: string | undefined,
+    status: any,
+    source: string
+  ): Promise<void> => {
     state.modelRetryCount = (state.modelRetryCount || 0) + 1;
     if (state.modelRetryCount < MAX_MODEL_RETRIES) {
       logInfo(`${source} \u2014 current fallback model is healthy, staying on it (retry ${state.modelRetryCount}/${MAX_MODEL_RETRIES})`, {
@@ -1349,36 +1610,28 @@ function createEventHandler(deps, helpers) {
     state.modelRetryCount = 0;
     const plan = planFallback(sessionID, state, fallbackModels, config);
     if (plan.success) {
-      if (config.notify_on_fallback) {
-        const modelName = plan.newModel?.split("/").pop() || plan.newModel;
-        deps.ctx.client.tui.showToast({
-          body: {
-            title: "Retry Detected -- Switching Model",
-            variant: "warning",
-            duration: 5000,
-            message: `${status.message || "Provider retrying"} -> ${modelName} (attempt ${state.attemptCount + 1} of ${fallbackModels.length})`
-          }
-        }).catch(() => {});
-      }
+      helpers.notifyFallback({
+        title: "Retry Detected -- Switching Model",
+        newModel: plan.newModel,
+        prefixMessage: status.message || "Provider retrying",
+        attemptCount: state.attemptCount + 1,
+        totalFallbackModels: fallbackModels.length
+      });
       await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, source, plan);
     } else if (!plan.success) {
       logError(`${source} fallback failed`, {
         sessionID,
         error: plan.error
       });
-      if (plan.maxAttemptsReached && config.notify_on_fallback) {
-        await deps.ctx.client.tui.showToast({
-          body: {
-            title: "All Fallbacks Exhausted",
-            variant: "error",
-            duration: 8000,
-            message: `All ${fallbackModels.length} fallback models exhausted after ${state.attemptCount} attempts`
-          }
-        }).catch(() => {});
+      if (plan.maxAttemptsReached) {
+        await helpers.notifyExhausted({
+          totalFallbackModels: fallbackModels.length,
+          attemptCount: state.attemptCount
+        });
       }
     }
   };
-  const handleSessionStatus = async (props) => {
+  const handleSessionStatus = async (props: any): Promise<void> => {
     const sessionID = props?.sessionID;
     const status = props?.status;
     const agent = props?.agent;
@@ -1429,24 +1682,21 @@ function createEventHandler(deps, helpers) {
           return;
         }
       }
-      let state = sessionStates.get(sessionID);
+      const isNewState = !sessionStates.has(sessionID);
+      const state = helpers.getOrCreateFallbackState(sessionID, {
+        resolvedAgent,
+        allowFirstAgentFallback: true
+      });
       if (!state) {
-        const agentConfig = resolvedAgent && deps.agentConfigs ? deps.agentConfigs[resolvedAgent] : undefined;
-        const initialModel = agentConfig?.model ?? findFirstAgentModel();
-        if (!initialModel) {
-          logInfo("No model info for session.status fallback", { sessionID });
-          return;
-        }
+        logInfo("No model info for session.status fallback", { sessionID });
+        return;
+      }
+      if (isNewState) {
         logInfo("Creating on-demand state for session.status", {
           sessionID,
-          model: initialModel,
+          model: state.originalModel,
           agent: resolvedAgent
         });
-        state = createFallbackState(initialModel);
-        sessionStates.set(sessionID, state);
-        sessionLastAccess.set(sessionID, Date.now());
-      } else {
-        sessionLastAccess.set(sessionID, Date.now());
       }
       sessionAwaitingFallbackResult.delete(sessionID);
       helpers.clearSessionFallbackTimeout(sessionID);
@@ -1456,39 +1706,31 @@ function createEventHandler(deps, helpers) {
       }
       const plan = planFallback(sessionID, state, fallbackModels, config);
       if (plan.success) {
-        if (config.notify_on_fallback) {
-          const modelName = plan.newModel?.split("/").pop() || plan.newModel;
-          deps.ctx.client.tui.showToast({
-            body: {
-              title: "Retry Detected -- Switching Model",
-              variant: "warning",
-              duration: 5000,
-              message: `${status.message || "Provider retrying"} -> ${modelName} (attempt ${state.attemptCount + 1} of ${fallbackModels.length})`
-            }
-          }).catch(() => {});
-        }
+        helpers.notifyFallback({
+          title: "Retry Detected -- Switching Model",
+          newModel: plan.newModel,
+          prefixMessage: status.message || "Provider retrying",
+          attemptCount: state.attemptCount + 1,
+          totalFallbackModels: fallbackModels.length
+        });
         await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.status", plan);
       } else if (!plan.success) {
         logError("session.status fallback failed", {
           sessionID,
           error: plan.error
         });
-        if (plan.maxAttemptsReached && config.notify_on_fallback) {
-          await deps.ctx.client.tui.showToast({
-            body: {
-              title: "All Fallbacks Exhausted",
-              variant: "error",
-              duration: 8000,
-              message: `All ${fallbackModels.length} fallback models exhausted after ${state.attemptCount} attempts`
-            }
-          }).catch(() => {});
+        if (plan.maxAttemptsReached) {
+          await helpers.notifyExhausted({
+            totalFallbackModels: fallbackModels.length,
+            attemptCount: state.attemptCount
+          });
         }
       }
     } finally {
       sessionRetryInFlight.delete(sessionID);
     }
   };
-  const handleSessionError = async (props) => {
+  const handleSessionError = async (props: any): Promise<void> => {
     const sessionID = props?.sessionID;
     const error = props?.error;
     const agent = props?.agent;
@@ -1621,9 +1863,7 @@ function createEventHandler(deps, helpers) {
       if (!state) {
         const currentModel = props?.model;
         if (currentModel) {
-          state = createFallbackState(currentModel);
-          sessionStates.set(sessionID, state);
-          sessionLastAccess.set(sessionID, Date.now());
+          state = helpers.getOrCreateFallbackState(sessionID, { preferredModel: currentModel });
         } else if (!errorModel && sessionRetryInFlight.has(sessionID)) {
           logInfo("Deferring to message.updated handler (no state, no errorModel, retry in flight)", {
             sessionID,
@@ -1639,19 +1879,15 @@ function createEventHandler(deps, helpers) {
               agent: resolvedAgent,
               model: agentModel
             });
-            state = createFallbackState(agentModel);
-            sessionStates.set(sessionID, state);
-            sessionLastAccess.set(sessionID, Date.now());
+            state = helpers.getOrCreateFallbackState(sessionID, { preferredModel: agentModel });
           } else {
-            const firstModel = findFirstAgentModel();
+            const firstModel = helpers.findFirstAgentModel();
             if (firstModel) {
               logInfo("Using first available agent model for state creation", {
                 sessionID,
                 model: firstModel
               });
-              state = createFallbackState(firstModel);
-              sessionStates.set(sessionID, state);
-              sessionLastAccess.set(sessionID, Date.now());
+              state = helpers.getOrCreateFallbackState(sessionID, { preferredModel: firstModel });
             } else {
               logInfo("No model info available, cannot fallback", { sessionID });
               return;
@@ -1661,20 +1897,15 @@ function createEventHandler(deps, helpers) {
       } else {
         sessionLastAccess.set(sessionID, Date.now());
       }
+      if (!state) return;
       const plan = planFallback(sessionID, state, fallbackModels, config);
       if (plan.success) {
-        if (config.notify_on_fallback) {
-          const modelName = plan.newModel?.split("/").pop() || plan.newModel;
-          const attemptInfo = `attempt ${state.attemptCount + 1} of ${fallbackModels.length}`;
-          deps.ctx.client.tui.showToast({
-            body: {
-              title: "Model Fallback",
-              message: `Switching to ${modelName} (${attemptInfo})`,
-              variant: "warning",
-              duration: 5000
-            }
-          }).catch(() => {});
-        }
+        helpers.notifyFallback({
+          title: "Model Fallback",
+          newModel: plan.newModel,
+          attemptCount: state.attemptCount + 1,
+          totalFallbackModels: fallbackModels.length
+        });
         await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.error", plan);
       } else {
         logError("Fallback preparation failed", {
@@ -1686,7 +1917,7 @@ function createEventHandler(deps, helpers) {
       sessionRetryInFlight.delete(sessionID);
     }
   };
-  const handleSessionCompacted = (props) => {
+  const handleSessionCompacted = (props: any): void => {
     const sessionID = props?.sessionID;
     if (!sessionID)
       return;
@@ -1701,31 +1932,19 @@ function createEventHandler(deps, helpers) {
       logInfo("Compaction completed, clearing fallback state", { sessionID });
     }
   };
-  function findFirstAgentModel() {
-    if (!deps.agentConfigs)
-      return;
-    for (const agentName of Object.keys(deps.agentConfigs)) {
-      const agentConfig = deps.agentConfigs[agentName];
-      const model = agentConfig?.model;
-      if (model)
-        return model;
-    }
-    return;
-  }
-  async function triggerImmediateFallback(sessionID, resolvedAgent, fallbackModels, status) {
-    let state = sessionStates.get(sessionID);
+  async function triggerImmediateFallback(
+    sessionID: string,
+    resolvedAgent: string | undefined,
+    fallbackModels: string[],
+    status: any
+  ): Promise<void> {
+    const state = helpers.getOrCreateFallbackState(sessionID, {
+      resolvedAgent,
+      allowFirstAgentFallback: true
+    });
     if (!state) {
-      const agentConfig = resolvedAgent && deps.agentConfigs ? deps.agentConfigs[resolvedAgent] : undefined;
-      const initialModel = agentConfig?.model ?? findFirstAgentModel();
-      if (!initialModel) {
-        logError("Cannot trigger immediate fallback - no model info", { sessionID });
-        return;
-      }
-      state = createFallbackState(initialModel);
-      sessionStates.set(sessionID, state);
-      sessionLastAccess.set(sessionID, Date.now());
-    } else {
-      sessionLastAccess.set(sessionID, Date.now());
+      logError("Cannot trigger immediate fallback - no model info", { sessionID });
+      return;
     }
     sessionAwaitingFallbackResult.delete(sessionID);
     helpers.clearSessionFallbackTimeout(sessionID);
@@ -1735,37 +1954,27 @@ function createEventHandler(deps, helpers) {
     }
     const plan = planFallback(sessionID, state, fallbackModels, config);
     if (plan.success) {
-      if (config.notify_on_fallback) {
-        const modelName = plan.newModel?.split("/").pop() || plan.newModel;
-        deps.ctx.client.tui.showToast({
-          body: {
-            title: "Provider Retry Too Slow - Switching Model",
-            variant: "warning",
-            duration: 5000,
-            message: `${status.message || "Provider retrying"} -> ${modelName} (immediate fallback)`
-          }
-        }).catch(() => {});
-      }
+      helpers.notifyFallback({
+        title: "Provider Retry Too Slow - Switching Model",
+        newModel: plan.newModel,
+        prefixMessage: status.message || "Provider retrying",
+        immediate: true
+      });
       await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "session.status.immediate", plan);
     } else if (!plan.success) {
       logError("Immediate fallback preparation failed", {
         sessionID,
         error: plan.error
       });
-      if (plan.maxAttemptsReached && config.notify_on_fallback) {
-        await deps.ctx.client.tui.showToast({
-          body: {
-            title: "All Fallbacks Exhausted",
-            variant: "error",
-            duration: 8000,
-            message: `All ${fallbackModels.length} fallback models exhausted`
-          }
-        }).catch(() => {});
+      if (plan.maxAttemptsReached) {
+        await helpers.notifyExhausted({
+          totalFallbackModels: fallbackModels.length
+        });
       }
     }
   }
   return {
-    handleEvent: async ({ event }) => {
+    handleEvent: async ({ event }: { event: any }): Promise<void> => {
       if (!config.enabled)
         return;
       const props = event.properties;
@@ -1803,14 +2012,14 @@ function createEventHandler(deps, helpers) {
 }
 
 // message-update-handler.ts
-function hasVisibleAssistantResponse(extractAutoRetrySignalFn) {
-  return async (ctx, sessionID, _info) => {
+function hasVisibleAssistantResponse(extractAutoRetrySignalFn: (info: any) => { signal: string } | undefined) {
+  return async (ctx: PluginInput, sessionID: string, _info: any): Promise<boolean> => {
     try {
-      const messagesResp = await ctx.client.session.messages({
+      const messagesResp: any = await ctx.client.session.messages({
         path: { id: sessionID },
         query: { directory: ctx.directory }
       });
-      const msgs = messagesResp.data;
+      const msgs: any[] = messagesResp.data;
       if (!msgs || msgs.length === 0)
         return false;
       const lastAssistant = [...msgs].reverse().find((m) => m.info?.role === "assistant");
@@ -1819,9 +2028,8 @@ function hasVisibleAssistantResponse(extractAutoRetrySignalFn) {
       if (lastAssistant.info?.error)
         return false;
       const parts = lastAssistant.parts ?? lastAssistant.info?.parts;
-      const hasToolCall = (parts ?? []).some((p) => p.type === "tool_call");
-      const textFromParts = (parts ?? []).filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text.trim()).filter((text) => text.length > 0).join(`
-`);
+      const hasToolCall = (parts ?? []).some((p: any) => p.type === "tool_call");
+      const textFromParts = (parts ?? []).filter((p: any) => p.type === "text" && typeof p.text === "string").map((p: any) => p.text.trim()).filter((text: string) => text.length > 0).join("\n");
       if (hasToolCall)
         return true;
       if (!textFromParts)
@@ -1834,18 +2042,18 @@ function hasVisibleAssistantResponse(extractAutoRetrySignalFn) {
     }
   };
 }
-async function checkLastAssistantForErrorContent(ctx, sessionID) {
+async function checkLastAssistantForErrorContent(ctx: PluginInput, sessionID: string): Promise<string | undefined> {
   try {
-    const messagesResp = await ctx.client.session.messages({
+    const messagesResp: any = await ctx.client.session.messages({
       path: { id: sessionID },
       query: { directory: ctx.directory }
     });
-    const msgs = messagesResp.data;
+    const msgs: any[] = messagesResp.data;
     if (!msgs || msgs.length === 0)
-      return;
+      return undefined;
     const lastAssistant = [...msgs].reverse().find((m) => m.info?.role === "assistant");
     if (!lastAssistant)
-      return;
+      return undefined;
     const parts = lastAssistant.parts ?? lastAssistant.info?.parts;
     const result = extractErrorContentFromParts(parts);
     if (result.hasError)
@@ -1853,12 +2061,12 @@ async function checkLastAssistantForErrorContent(ctx, sessionID) {
     const textResult = detectErrorInTextParts(parts);
     if (textResult.hasError)
       return textResult.errorMessage;
-    return;
+    return undefined;
   } catch {
-    return;
+    return undefined;
   }
 }
-function createMessageUpdateHandler(deps, helpers) {
+function createMessageUpdateHandler(deps: EngineDeps, helpers: AutoRetryHelpers): (props: any) => Promise<void> {
   const {
     ctx,
     config,
@@ -1868,7 +2076,7 @@ function createMessageUpdateHandler(deps, helpers) {
     sessionAwaitingFallbackResult
   } = deps;
   const checkVisibleResponse = hasVisibleAssistantResponse(extractAutoRetrySignal);
-  return async (props) => {
+  return async (props: any): Promise<void> => {
     const info = props?.info;
     const sessionID = info?.sessionID;
     const retrySignalResult = extractAutoRetrySignal(info);
@@ -1908,11 +2116,7 @@ function createMessageUpdateHandler(deps, helpers) {
       if (!sessionAwaitingFallbackResult.has(sessionID)) {
         const needsTimeout = model && config.timeout_seconds > 0 && !deps.sessionFirstTokenReceived.get(sessionID) && !deps.sessionFallbackTimeouts.has(sessionID);
         if (needsTimeout) {
-          if (!sessionStates.has(sessionID)) {
-            const state = createFallbackState(model);
-            sessionStates.set(sessionID, state);
-            sessionLastAccess.set(sessionID, Date.now());
-          }
+          helpers.getOrCreateFallbackState(sessionID, { preferredModel: model });
           const agent = info?.agent;
           helpers.resolveAgentForSessionFromContext(sessionID, agent).then((resolvedAgent) => {
             const fallbackModels = getFallbackModelsForSession(sessionID, resolvedAgent, deps.agentConfigs, deps.globalFallbackModels);
@@ -1926,7 +2130,7 @@ function createMessageUpdateHandler(deps, helpers) {
             }
           }).catch(() => {});
         } else if (sessionStates.has(sessionID)) {
-          const eventHasContent = parts?.some((p) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0 || p.type === "tool_call" || p.type === "tool");
+          const eventHasContent = parts?.some((p: any) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0 || p.type === "tool_call" || p.type === "tool");
           if (eventHasContent) {
             deps.sessionFirstTokenReceived.set(sessionID, true);
           }
@@ -1941,7 +2145,7 @@ function createMessageUpdateHandler(deps, helpers) {
       }
       const hasVisible = await checkVisibleResponse(ctx, sessionID, info);
       if (!hasVisible) {
-        const eventHasActivity = parts?.some((p) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0 || p.type === "tool_call");
+        const eventHasActivity = parts?.some((p: any) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0 || p.type === "tool_call");
         if (eventHasActivity) {
           deps.sessionFirstTokenReceived.set(sessionID, true);
         }
@@ -2127,9 +2331,7 @@ function createMessageUpdateHandler(deps, helpers) {
             });
             return;
           }
-          state = createFallbackState(initialModel);
-          sessionStates.set(sessionID, state);
-          sessionLastAccess.set(sessionID, Date.now());
+          state = helpers.getOrCreateFallbackState(sessionID, { preferredModel: initialModel });
         } else {
           sessionLastAccess.set(sessionID, Date.now());
           if (state.pendingFallbackModel && retrySignal && timeoutEnabled) {
@@ -2140,18 +2342,12 @@ function createMessageUpdateHandler(deps, helpers) {
             state.pendingFallbackModel = undefined;
           }
         }
+        if (!state) return;
         const plan = planFallback(sessionID, state, fallbackModels, config);
         if (plan.success) {
-          if (config.notify_on_fallback) {
-            deps.ctx.client.tui.showToast({
-              body: {
-                title: "Model Fallback",
-                message: `Switching to ${plan.newModel?.split("/").pop() || plan.newModel} for next request`,
-                variant: "warning",
-                duration: 5000
-              }
-            }).catch(() => {});
-          }
+          helpers.notifyFallback({
+            newModel: plan.newModel
+          });
           await helpers.autoRetryWithFallback(sessionID, plan.newModel, resolvedAgent, "message.updated", plan);
         }
       } finally {
@@ -2162,16 +2358,15 @@ function createMessageUpdateHandler(deps, helpers) {
 }
 
 // chat-message-handler.ts
-function createChatMessageHandler(deps, helpers) {
+function createChatMessageHandler(deps: EngineDeps, helpers: AutoRetryHelpers): (input: any, output: any) => Promise<void> {
   const {
-    ctx,
     config,
     sessionStates,
     sessionLastAccess,
     sessionRetryInFlight,
     sessionAwaitingFallbackResult
   } = deps;
-  return async (input, output) => {
+  return async (input: any, output: any): Promise<void> => {
     if (!config.enabled)
       return;
     const { sessionID } = input;
@@ -2201,17 +2396,7 @@ function createChatMessageHandler(deps, helpers) {
             sessionID,
             model: state.originalModel
           });
-          if (config.notify_on_fallback) {
-            const modelName = state.originalModel.split("/").pop() || state.originalModel;
-            ctx.client.tui.showToast({
-              body: {
-                title: "Model Recovered",
-                message: `Recovered to ${modelName}`,
-                variant: "info",
-                duration: 3000
-              }
-            }).catch(() => {});
-          }
+          helpers.notifyRecovered(state.originalModel);
         }
       }
     }
@@ -2268,34 +2453,35 @@ function createChatMessageHandler(deps, helpers) {
 }
 
 // subagent-result-sync.ts
-function isEmptyTaskResult(output) {
+function isEmptyTaskResult(output?: string): boolean {
+  if (!output) return false;
   return /<task_result>\s*<\/task_result>/.test(output);
 }
-var TASK_ID_REGEX = /task_id:\s*(ses_[a-zA-Z0-9]+)/;
-function extractChildSessionID(output) {
+const TASK_ID_REGEX = /task_id:\s*(ses_[a-zA-Z0-9]+)/;
+function extractChildSessionID(output?: string): string | null {
   if (!output)
     return null;
   const match = output.match(TASK_ID_REGEX);
   return match ? match[1] : null;
 }
-function getSessionStatusType(sessionData) {
+function getSessionStatusType(sessionData: any): string | undefined {
   const status = sessionData?.status;
   if (!status)
-    return;
+    return undefined;
   if (typeof status === "string")
     return status;
   if (typeof status === "object" && status !== null && "type" in status) {
     return status.type;
   }
-  return;
+  return undefined;
 }
-function waitForSessionIdle(deps, sessionID, inactivityMs, pollIntervalMs = 2000) {
-  return new Promise((resolve) => {
+function waitForSessionIdle(deps: EngineDeps, sessionID: string, inactivityMs: number, pollIntervalMs = 2000): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     let settled = false;
-    let pollTimer;
-    let timeoutTimer;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     let lastSeenMessageTime = deps.sessionLastMessageTime.get(sessionID) ?? Date.now();
-    const settle = (result) => {
+    const settle = (result: boolean): void => {
       if (settled)
         return;
       settled = true;
@@ -2313,20 +2499,20 @@ function waitForSessionIdle(deps, sessionID, inactivityMs, pollIntervalMs = 2000
       }
       resolve(result);
     };
-    const onIdleRef = () => settle(true);
+    const onIdleRef = (): void => settle(true);
     let resolvers = deps.sessionIdleResolvers.get(sessionID);
     if (!resolvers) {
       resolvers = [];
       deps.sessionIdleResolvers.set(sessionID, resolvers);
     }
     resolvers.push(onIdleRef);
-    const resetTimeout = () => {
+    const resetTimeout = (): void => {
       if (timeoutTimer)
         clearTimeout(timeoutTimer);
       timeoutTimer = setTimeout(() => settle(false), inactivityMs);
     };
     resetTimeout();
-    const pollStatus = () => {
+    const pollStatus = (): void => {
       if (settled)
         return;
       const currentMessageTime = deps.sessionLastMessageTime.get(sessionID);
@@ -2334,7 +2520,7 @@ function waitForSessionIdle(deps, sessionID, inactivityMs, pollIntervalMs = 2000
         lastSeenMessageTime = currentMessageTime;
         resetTimeout();
       }
-      deps.ctx.client.session.get({ path: { id: sessionID } }).then((sessionInfo) => {
+      deps.ctx.client.session.get({ path: { id: sessionID } }).then((sessionInfo: any) => {
         if (settled)
           return;
         const statusType = getSessionStatusType(sessionInfo?.data ?? sessionInfo);
@@ -2348,7 +2534,11 @@ function waitForSessionIdle(deps, sessionID, inactivityMs, pollIntervalMs = 2000
     pollTimer = setInterval(pollStatus, pollIntervalMs);
   });
 }
-async function waitForChildFallbackResult(deps, childSessionID, options) {
+async function waitForChildFallbackResult(
+  deps: EngineDeps,
+  childSessionID: string,
+  options?: { maxWaitMs?: number; pollIntervalMs?: number }
+): Promise<string | null> {
   const maxWaitMs = options?.maxWaitMs ?? Math.min((deps.config.timeout_seconds || 120) * 1000, 120000);
   const pollIntervalMs = options?.pollIntervalMs ?? 500;
   const startTime = Date.now();
@@ -2358,7 +2548,7 @@ async function waitForChildFallbackResult(deps, childSessionID, options) {
       logInfo(`[subagent-sync] Timed out waiting for child ${childSessionID} dispatch after ${maxWaitMs}ms`);
       return null;
     }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
   }
   const remainingMs = Math.max(1000, maxWaitMs - (Date.now() - startTime));
   const wentIdle = await waitForSessionIdle(deps, childSessionID, remainingMs, pollIntervalMs);
@@ -2374,18 +2564,18 @@ async function waitForChildFallbackResult(deps, childSessionID, options) {
   logInfo(`[subagent-sync] Child ${childSessionID} idle but no assistant response found`);
   return null;
 }
-async function extractAssistantResponse(deps, childSessionID) {
+async function extractAssistantResponse(deps: EngineDeps, childSessionID: string): Promise<string | null> {
   try {
-    const msgs = await deps.ctx.client.session.messages({
+    const msgs: any = await deps.ctx.client.session.messages({
       path: { id: childSessionID },
       query: { directory: deps.ctx.directory }
     });
     if (!msgs.data || msgs.data.length === 0)
       return null;
-    const lastAssistant = [...msgs.data].reverse().find((m) => m.info?.role === "assistant");
+    const lastAssistant = [...msgs.data].reverse().find((m: any) => m.info?.role === "assistant");
     if (!lastAssistant?.parts)
       return null;
-    const textParts = lastAssistant.parts.filter((p) => p.type === "text" && p.text).map((p) => p.text);
+    const textParts = lastAssistant.parts.filter((p: any) => p.type === "text" && p.text).map((p: any) => p.text);
     if (textParts.length === 0)
       return null;
     return textParts.join("");
@@ -2396,826 +2586,18 @@ async function extractAssistantResponse(deps, childSessionID) {
 }
 
 // index.ts
-import { readFileSync, existsSync } from "fs";
-import { join as join2 } from "path";
-
-// node_modules/jsonc-parser/lib/esm/impl/scanner.js
-function createScanner(text, ignoreTrivia = false) {
-  const len = text.length;
-  let pos = 0, value = "", tokenOffset = 0, token = 16, lineNumber = 0, lineStartOffset = 0, tokenLineStartOffset = 0, prevTokenLineStartOffset = 0, scanError = 0;
-  function scanHexDigits(count, exact) {
-    let digits = 0;
-    let value = 0;
-    while (digits < count || !exact) {
-      let ch = text.charCodeAt(pos);
-      if (ch >= 48 && ch <= 57) {
-        value = value * 16 + ch - 48;
-      } else if (ch >= 65 && ch <= 70) {
-        value = value * 16 + ch - 65 + 10;
-      } else if (ch >= 97 && ch <= 102) {
-        value = value * 16 + ch - 97 + 10;
-      } else {
-        break;
-      }
-      pos++;
-      digits++;
-    }
-    if (digits < count) {
-      value = -1;
-    }
-    return value;
-  }
-  function setPosition(newPosition) {
-    pos = newPosition;
-    value = "";
-    tokenOffset = 0;
-    token = 16;
-    scanError = 0;
-  }
-  function scanNumber() {
-    let start = pos;
-    if (text.charCodeAt(pos) === 48) {
-      pos++;
-    } else {
-      pos++;
-      while (pos < text.length && isDigit(text.charCodeAt(pos))) {
-        pos++;
-      }
-    }
-    if (pos < text.length && text.charCodeAt(pos) === 46) {
-      pos++;
-      if (pos < text.length && isDigit(text.charCodeAt(pos))) {
-        pos++;
-        while (pos < text.length && isDigit(text.charCodeAt(pos))) {
-          pos++;
-        }
-      } else {
-        scanError = 3;
-        return text.substring(start, pos);
-      }
-    }
-    let end = pos;
-    if (pos < text.length && (text.charCodeAt(pos) === 69 || text.charCodeAt(pos) === 101)) {
-      pos++;
-      if (pos < text.length && text.charCodeAt(pos) === 43 || text.charCodeAt(pos) === 45) {
-        pos++;
-      }
-      if (pos < text.length && isDigit(text.charCodeAt(pos))) {
-        pos++;
-        while (pos < text.length && isDigit(text.charCodeAt(pos))) {
-          pos++;
-        }
-        end = pos;
-      } else {
-        scanError = 3;
-      }
-    }
-    return text.substring(start, end);
-  }
-  function scanString() {
-    let result = "", start = pos;
-    while (true) {
-      if (pos >= len) {
-        result += text.substring(start, pos);
-        scanError = 2;
-        break;
-      }
-      const ch = text.charCodeAt(pos);
-      if (ch === 34) {
-        result += text.substring(start, pos);
-        pos++;
-        break;
-      }
-      if (ch === 92) {
-        result += text.substring(start, pos);
-        pos++;
-        if (pos >= len) {
-          scanError = 2;
-          break;
-        }
-        const ch2 = text.charCodeAt(pos++);
-        switch (ch2) {
-          case 34:
-            result += '"';
-            break;
-          case 92:
-            result += "\\";
-            break;
-          case 47:
-            result += "/";
-            break;
-          case 98:
-            result += "\b";
-            break;
-          case 102:
-            result += "\f";
-            break;
-          case 110:
-            result += `
-`;
-            break;
-          case 114:
-            result += "\r";
-            break;
-          case 116:
-            result += "\t";
-            break;
-          case 117:
-            const ch3 = scanHexDigits(4, true);
-            if (ch3 >= 0) {
-              result += String.fromCharCode(ch3);
-            } else {
-              scanError = 4;
-            }
-            break;
-          default:
-            scanError = 5;
-        }
-        start = pos;
-        continue;
-      }
-      if (ch >= 0 && ch <= 31) {
-        if (isLineBreak(ch)) {
-          result += text.substring(start, pos);
-          scanError = 2;
-          break;
-        } else {
-          scanError = 6;
-        }
-      }
-      pos++;
-    }
-    return result;
-  }
-  function scanNext() {
-    value = "";
-    scanError = 0;
-    tokenOffset = pos;
-    lineStartOffset = lineNumber;
-    prevTokenLineStartOffset = tokenLineStartOffset;
-    if (pos >= len) {
-      tokenOffset = len;
-      return token = 17;
-    }
-    let code = text.charCodeAt(pos);
-    if (isWhiteSpace(code)) {
-      do {
-        pos++;
-        value += String.fromCharCode(code);
-        code = text.charCodeAt(pos);
-      } while (isWhiteSpace(code));
-      return token = 15;
-    }
-    if (isLineBreak(code)) {
-      pos++;
-      value += String.fromCharCode(code);
-      if (code === 13 && text.charCodeAt(pos) === 10) {
-        pos++;
-        value += `
-`;
-      }
-      lineNumber++;
-      tokenLineStartOffset = pos;
-      return token = 14;
-    }
-    switch (code) {
-      case 123:
-        pos++;
-        return token = 1;
-      case 125:
-        pos++;
-        return token = 2;
-      case 91:
-        pos++;
-        return token = 3;
-      case 93:
-        pos++;
-        return token = 4;
-      case 58:
-        pos++;
-        return token = 6;
-      case 44:
-        pos++;
-        return token = 5;
-      case 34:
-        pos++;
-        value = scanString();
-        return token = 10;
-      case 47:
-        const start = pos - 1;
-        if (text.charCodeAt(pos + 1) === 47) {
-          pos += 2;
-          while (pos < len) {
-            if (isLineBreak(text.charCodeAt(pos))) {
-              break;
-            }
-            pos++;
-          }
-          value = text.substring(start, pos);
-          return token = 12;
-        }
-        if (text.charCodeAt(pos + 1) === 42) {
-          pos += 2;
-          const safeLength = len - 1;
-          let commentClosed = false;
-          while (pos < safeLength) {
-            const ch = text.charCodeAt(pos);
-            if (ch === 42 && text.charCodeAt(pos + 1) === 47) {
-              pos += 2;
-              commentClosed = true;
-              break;
-            }
-            pos++;
-            if (isLineBreak(ch)) {
-              if (ch === 13 && text.charCodeAt(pos) === 10) {
-                pos++;
-              }
-              lineNumber++;
-              tokenLineStartOffset = pos;
-            }
-          }
-          if (!commentClosed) {
-            pos++;
-            scanError = 1;
-          }
-          value = text.substring(start, pos);
-          return token = 13;
-        }
-        value += String.fromCharCode(code);
-        pos++;
-        return token = 16;
-      case 45:
-        value += String.fromCharCode(code);
-        pos++;
-        if (pos === len || !isDigit(text.charCodeAt(pos))) {
-          return token = 16;
-        }
-      case 48:
-      case 49:
-      case 50:
-      case 51:
-      case 52:
-      case 53:
-      case 54:
-      case 55:
-      case 56:
-      case 57:
-        value += scanNumber();
-        return token = 11;
-      default:
-        while (pos < len && isUnknownContentCharacter(code)) {
-          pos++;
-          code = text.charCodeAt(pos);
-        }
-        if (tokenOffset !== pos) {
-          value = text.substring(tokenOffset, pos);
-          switch (value) {
-            case "true":
-              return token = 8;
-            case "false":
-              return token = 9;
-            case "null":
-              return token = 7;
-          }
-          return token = 16;
-        }
-        value += String.fromCharCode(code);
-        pos++;
-        return token = 16;
-    }
-  }
-  function isUnknownContentCharacter(code) {
-    if (isWhiteSpace(code) || isLineBreak(code)) {
-      return false;
-    }
-    switch (code) {
-      case 125:
-      case 93:
-      case 123:
-      case 91:
-      case 34:
-      case 58:
-      case 44:
-      case 47:
-        return false;
-    }
-    return true;
-  }
-  function scanNextNonTrivia() {
-    let result;
-    do {
-      result = scanNext();
-    } while (result >= 12 && result <= 15);
-    return result;
-  }
-  return {
-    setPosition,
-    getPosition: () => pos,
-    scan: ignoreTrivia ? scanNextNonTrivia : scanNext,
-    getToken: () => token,
-    getTokenValue: () => value,
-    getTokenOffset: () => tokenOffset,
-    getTokenLength: () => pos - tokenOffset,
-    getTokenStartLine: () => lineStartOffset,
-    getTokenStartCharacter: () => tokenOffset - prevTokenLineStartOffset,
-    getTokenError: () => scanError
-  };
-}
-function isWhiteSpace(ch) {
-  return ch === 32 || ch === 9;
-}
-function isLineBreak(ch) {
-  return ch === 10 || ch === 13;
-}
-function isDigit(ch) {
-  return ch >= 48 && ch <= 57;
-}
-var CharacterCodes;
-(function(CharacterCodes) {
-  CharacterCodes[CharacterCodes["lineFeed"] = 10] = "lineFeed";
-  CharacterCodes[CharacterCodes["carriageReturn"] = 13] = "carriageReturn";
-  CharacterCodes[CharacterCodes["space"] = 32] = "space";
-  CharacterCodes[CharacterCodes["_0"] = 48] = "_0";
-  CharacterCodes[CharacterCodes["_1"] = 49] = "_1";
-  CharacterCodes[CharacterCodes["_2"] = 50] = "_2";
-  CharacterCodes[CharacterCodes["_3"] = 51] = "_3";
-  CharacterCodes[CharacterCodes["_4"] = 52] = "_4";
-  CharacterCodes[CharacterCodes["_5"] = 53] = "_5";
-  CharacterCodes[CharacterCodes["_6"] = 54] = "_6";
-  CharacterCodes[CharacterCodes["_7"] = 55] = "_7";
-  CharacterCodes[CharacterCodes["_8"] = 56] = "_8";
-  CharacterCodes[CharacterCodes["_9"] = 57] = "_9";
-  CharacterCodes[CharacterCodes["a"] = 97] = "a";
-  CharacterCodes[CharacterCodes["b"] = 98] = "b";
-  CharacterCodes[CharacterCodes["c"] = 99] = "c";
-  CharacterCodes[CharacterCodes["d"] = 100] = "d";
-  CharacterCodes[CharacterCodes["e"] = 101] = "e";
-  CharacterCodes[CharacterCodes["f"] = 102] = "f";
-  CharacterCodes[CharacterCodes["g"] = 103] = "g";
-  CharacterCodes[CharacterCodes["h"] = 104] = "h";
-  CharacterCodes[CharacterCodes["i"] = 105] = "i";
-  CharacterCodes[CharacterCodes["j"] = 106] = "j";
-  CharacterCodes[CharacterCodes["k"] = 107] = "k";
-  CharacterCodes[CharacterCodes["l"] = 108] = "l";
-  CharacterCodes[CharacterCodes["m"] = 109] = "m";
-  CharacterCodes[CharacterCodes["n"] = 110] = "n";
-  CharacterCodes[CharacterCodes["o"] = 111] = "o";
-  CharacterCodes[CharacterCodes["p"] = 112] = "p";
-  CharacterCodes[CharacterCodes["q"] = 113] = "q";
-  CharacterCodes[CharacterCodes["r"] = 114] = "r";
-  CharacterCodes[CharacterCodes["s"] = 115] = "s";
-  CharacterCodes[CharacterCodes["t"] = 116] = "t";
-  CharacterCodes[CharacterCodes["u"] = 117] = "u";
-  CharacterCodes[CharacterCodes["v"] = 118] = "v";
-  CharacterCodes[CharacterCodes["w"] = 119] = "w";
-  CharacterCodes[CharacterCodes["x"] = 120] = "x";
-  CharacterCodes[CharacterCodes["y"] = 121] = "y";
-  CharacterCodes[CharacterCodes["z"] = 122] = "z";
-  CharacterCodes[CharacterCodes["A"] = 65] = "A";
-  CharacterCodes[CharacterCodes["B"] = 66] = "B";
-  CharacterCodes[CharacterCodes["C"] = 67] = "C";
-  CharacterCodes[CharacterCodes["D"] = 68] = "D";
-  CharacterCodes[CharacterCodes["E"] = 69] = "E";
-  CharacterCodes[CharacterCodes["F"] = 70] = "F";
-  CharacterCodes[CharacterCodes["G"] = 71] = "G";
-  CharacterCodes[CharacterCodes["H"] = 72] = "H";
-  CharacterCodes[CharacterCodes["I"] = 73] = "I";
-  CharacterCodes[CharacterCodes["J"] = 74] = "J";
-  CharacterCodes[CharacterCodes["K"] = 75] = "K";
-  CharacterCodes[CharacterCodes["L"] = 76] = "L";
-  CharacterCodes[CharacterCodes["M"] = 77] = "M";
-  CharacterCodes[CharacterCodes["N"] = 78] = "N";
-  CharacterCodes[CharacterCodes["O"] = 79] = "O";
-  CharacterCodes[CharacterCodes["P"] = 80] = "P";
-  CharacterCodes[CharacterCodes["Q"] = 81] = "Q";
-  CharacterCodes[CharacterCodes["R"] = 82] = "R";
-  CharacterCodes[CharacterCodes["S"] = 83] = "S";
-  CharacterCodes[CharacterCodes["T"] = 84] = "T";
-  CharacterCodes[CharacterCodes["U"] = 85] = "U";
-  CharacterCodes[CharacterCodes["V"] = 86] = "V";
-  CharacterCodes[CharacterCodes["W"] = 87] = "W";
-  CharacterCodes[CharacterCodes["X"] = 88] = "X";
-  CharacterCodes[CharacterCodes["Y"] = 89] = "Y";
-  CharacterCodes[CharacterCodes["Z"] = 90] = "Z";
-  CharacterCodes[CharacterCodes["asterisk"] = 42] = "asterisk";
-  CharacterCodes[CharacterCodes["backslash"] = 92] = "backslash";
-  CharacterCodes[CharacterCodes["closeBrace"] = 125] = "closeBrace";
-  CharacterCodes[CharacterCodes["closeBracket"] = 93] = "closeBracket";
-  CharacterCodes[CharacterCodes["colon"] = 58] = "colon";
-  CharacterCodes[CharacterCodes["comma"] = 44] = "comma";
-  CharacterCodes[CharacterCodes["dot"] = 46] = "dot";
-  CharacterCodes[CharacterCodes["doubleQuote"] = 34] = "doubleQuote";
-  CharacterCodes[CharacterCodes["minus"] = 45] = "minus";
-  CharacterCodes[CharacterCodes["openBrace"] = 123] = "openBrace";
-  CharacterCodes[CharacterCodes["openBracket"] = 91] = "openBracket";
-  CharacterCodes[CharacterCodes["plus"] = 43] = "plus";
-  CharacterCodes[CharacterCodes["slash"] = 47] = "slash";
-  CharacterCodes[CharacterCodes["formFeed"] = 12] = "formFeed";
-  CharacterCodes[CharacterCodes["tab"] = 9] = "tab";
-})(CharacterCodes || (CharacterCodes = {}));
-
-// node_modules/jsonc-parser/lib/esm/impl/string-intern.js
-var cachedSpaces = new Array(20).fill(0).map((_, index) => {
-  return " ".repeat(index);
-});
-var maxCachedValues = 200;
-var cachedBreakLinesWithSpaces = {
-  " ": {
-    "\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return `
-` + " ".repeat(index);
-    }),
-    "\r": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\r" + " ".repeat(index);
-    }),
-    "\r\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return `\r
-` + " ".repeat(index);
-    })
-  },
-  "\t": {
-    "\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return `
-` + "\t".repeat(index);
-    }),
-    "\r": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return "\r" + "\t".repeat(index);
-    }),
-    "\r\n": new Array(maxCachedValues).fill(0).map((_, index) => {
-      return `\r
-` + "\t".repeat(index);
-    })
-  }
-};
-
-// node_modules/jsonc-parser/lib/esm/impl/parser.js
-var ParseOptions;
-(function(ParseOptions) {
-  ParseOptions.DEFAULT = {
-    allowTrailingComma: false
-  };
-})(ParseOptions || (ParseOptions = {}));
-function parse(text, errors = [], options = ParseOptions.DEFAULT) {
-  let currentProperty = null;
-  let currentParent = [];
-  const previousParents = [];
-  function onValue(value) {
-    if (Array.isArray(currentParent)) {
-      currentParent.push(value);
-    } else if (currentProperty !== null) {
-      currentParent[currentProperty] = value;
-    }
-  }
-  const visitor = {
-    onObjectBegin: () => {
-      const object = {};
-      onValue(object);
-      previousParents.push(currentParent);
-      currentParent = object;
-      currentProperty = null;
-    },
-    onObjectProperty: (name) => {
-      currentProperty = name;
-    },
-    onObjectEnd: () => {
-      currentParent = previousParents.pop();
-    },
-    onArrayBegin: () => {
-      const array = [];
-      onValue(array);
-      previousParents.push(currentParent);
-      currentParent = array;
-      currentProperty = null;
-    },
-    onArrayEnd: () => {
-      currentParent = previousParents.pop();
-    },
-    onLiteralValue: onValue,
-    onError: (error, offset, length) => {
-      errors.push({ error, offset, length });
-    }
-  };
-  visit(text, visitor, options);
-  return currentParent[0];
-}
-function visit(text, visitor, options = ParseOptions.DEFAULT) {
-  const _scanner = createScanner(text, false);
-  const _jsonPath = [];
-  let suppressedCallbacks = 0;
-  function toNoArgVisit(visitFunction) {
-    return visitFunction ? () => suppressedCallbacks === 0 && visitFunction(_scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter()) : () => true;
-  }
-  function toOneArgVisit(visitFunction) {
-    return visitFunction ? (arg) => suppressedCallbacks === 0 && visitFunction(arg, _scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter()) : () => true;
-  }
-  function toOneArgVisitWithPath(visitFunction) {
-    return visitFunction ? (arg) => suppressedCallbacks === 0 && visitFunction(arg, _scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter(), () => _jsonPath.slice()) : () => true;
-  }
-  function toBeginVisit(visitFunction) {
-    return visitFunction ? () => {
-      if (suppressedCallbacks > 0) {
-        suppressedCallbacks++;
-      } else {
-        let cbReturn = visitFunction(_scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter(), () => _jsonPath.slice());
-        if (cbReturn === false) {
-          suppressedCallbacks = 1;
-        }
-      }
-    } : () => true;
-  }
-  function toEndVisit(visitFunction) {
-    return visitFunction ? () => {
-      if (suppressedCallbacks > 0) {
-        suppressedCallbacks--;
-      }
-      if (suppressedCallbacks === 0) {
-        visitFunction(_scanner.getTokenOffset(), _scanner.getTokenLength(), _scanner.getTokenStartLine(), _scanner.getTokenStartCharacter());
-      }
-    } : () => true;
-  }
-  const onObjectBegin = toBeginVisit(visitor.onObjectBegin), onObjectProperty = toOneArgVisitWithPath(visitor.onObjectProperty), onObjectEnd = toEndVisit(visitor.onObjectEnd), onArrayBegin = toBeginVisit(visitor.onArrayBegin), onArrayEnd = toEndVisit(visitor.onArrayEnd), onLiteralValue = toOneArgVisitWithPath(visitor.onLiteralValue), onSeparator = toOneArgVisit(visitor.onSeparator), onComment = toNoArgVisit(visitor.onComment), onError = toOneArgVisit(visitor.onError);
-  const disallowComments = options && options.disallowComments;
-  const allowTrailingComma = options && options.allowTrailingComma;
-  function scanNext() {
-    while (true) {
-      const token = _scanner.scan();
-      switch (_scanner.getTokenError()) {
-        case 4:
-          handleError(14);
-          break;
-        case 5:
-          handleError(15);
-          break;
-        case 3:
-          handleError(13);
-          break;
-        case 1:
-          if (!disallowComments) {
-            handleError(11);
-          }
-          break;
-        case 2:
-          handleError(12);
-          break;
-        case 6:
-          handleError(16);
-          break;
-      }
-      switch (token) {
-        case 12:
-        case 13:
-          if (disallowComments) {
-            handleError(10);
-          } else {
-            onComment();
-          }
-          break;
-        case 16:
-          handleError(1);
-          break;
-        case 15:
-        case 14:
-          break;
-        default:
-          return token;
-      }
-    }
-  }
-  function handleError(error, skipUntilAfter = [], skipUntil = []) {
-    onError(error);
-    if (skipUntilAfter.length + skipUntil.length > 0) {
-      let token = _scanner.getToken();
-      while (token !== 17) {
-        if (skipUntilAfter.indexOf(token) !== -1) {
-          scanNext();
-          break;
-        } else if (skipUntil.indexOf(token) !== -1) {
-          break;
-        }
-        token = scanNext();
-      }
-    }
-  }
-  function parseString(isValue) {
-    const value = _scanner.getTokenValue();
-    if (isValue) {
-      onLiteralValue(value);
-    } else {
-      onObjectProperty(value);
-      _jsonPath.push(value);
-    }
-    scanNext();
-    return true;
-  }
-  function parseLiteral() {
-    switch (_scanner.getToken()) {
-      case 11:
-        const tokenValue = _scanner.getTokenValue();
-        let value = Number(tokenValue);
-        if (isNaN(value)) {
-          handleError(2);
-          value = 0;
-        }
-        onLiteralValue(value);
-        break;
-      case 7:
-        onLiteralValue(null);
-        break;
-      case 8:
-        onLiteralValue(true);
-        break;
-      case 9:
-        onLiteralValue(false);
-        break;
-      default:
-        return false;
-    }
-    scanNext();
-    return true;
-  }
-  function parseProperty() {
-    if (_scanner.getToken() !== 10) {
-      handleError(3, [], [2, 5]);
-      return false;
-    }
-    parseString(false);
-    if (_scanner.getToken() === 6) {
-      onSeparator(":");
-      scanNext();
-      if (!parseValue()) {
-        handleError(4, [], [2, 5]);
-      }
-    } else {
-      handleError(5, [], [2, 5]);
-    }
-    _jsonPath.pop();
-    return true;
-  }
-  function parseObject() {
-    onObjectBegin();
-    scanNext();
-    let needsComma = false;
-    while (_scanner.getToken() !== 2 && _scanner.getToken() !== 17) {
-      if (_scanner.getToken() === 5) {
-        if (!needsComma) {
-          handleError(4, [], []);
-        }
-        onSeparator(",");
-        scanNext();
-        if (_scanner.getToken() === 2 && allowTrailingComma) {
-          break;
-        }
-      } else if (needsComma) {
-        handleError(6, [], []);
-      }
-      if (!parseProperty()) {
-        handleError(4, [], [2, 5]);
-      }
-      needsComma = true;
-    }
-    onObjectEnd();
-    if (_scanner.getToken() !== 2) {
-      handleError(7, [2], []);
-    } else {
-      scanNext();
-    }
-    return true;
-  }
-  function parseArray() {
-    onArrayBegin();
-    scanNext();
-    let isFirstElement = true;
-    let needsComma = false;
-    while (_scanner.getToken() !== 4 && _scanner.getToken() !== 17) {
-      if (_scanner.getToken() === 5) {
-        if (!needsComma) {
-          handleError(4, [], []);
-        }
-        onSeparator(",");
-        scanNext();
-        if (_scanner.getToken() === 4 && allowTrailingComma) {
-          break;
-        }
-      } else if (needsComma) {
-        handleError(6, [], []);
-      }
-      if (isFirstElement) {
-        _jsonPath.push(0);
-        isFirstElement = false;
-      } else {
-        _jsonPath[_jsonPath.length - 1]++;
-      }
-      if (!parseValue()) {
-        handleError(4, [], [4, 5]);
-      }
-      needsComma = true;
-    }
-    onArrayEnd();
-    if (!isFirstElement) {
-      _jsonPath.pop();
-    }
-    if (_scanner.getToken() !== 4) {
-      handleError(8, [4], []);
-    } else {
-      scanNext();
-    }
-    return true;
-  }
-  function parseValue() {
-    switch (_scanner.getToken()) {
-      case 3:
-        return parseArray();
-      case 1:
-        return parseObject();
-      case 10:
-        return parseString(true);
-      default:
-        return parseLiteral();
-    }
-  }
-  scanNext();
-  if (_scanner.getToken() === 17) {
-    if (options.allowEmptyContent) {
-      return true;
-    }
-    handleError(4, [], []);
-    return false;
-  }
-  if (!parseValue()) {
-    handleError(4, [], []);
-    return false;
-  }
-  if (_scanner.getToken() !== 17) {
-    handleError(9, [], []);
-  }
-  return true;
-}
-
-// node_modules/jsonc-parser/lib/esm/main.js
-var ScanError;
-(function(ScanError) {
-  ScanError[ScanError["None"] = 0] = "None";
-  ScanError[ScanError["UnexpectedEndOfComment"] = 1] = "UnexpectedEndOfComment";
-  ScanError[ScanError["UnexpectedEndOfString"] = 2] = "UnexpectedEndOfString";
-  ScanError[ScanError["UnexpectedEndOfNumber"] = 3] = "UnexpectedEndOfNumber";
-  ScanError[ScanError["InvalidUnicode"] = 4] = "InvalidUnicode";
-  ScanError[ScanError["InvalidEscapeCharacter"] = 5] = "InvalidEscapeCharacter";
-  ScanError[ScanError["InvalidCharacter"] = 6] = "InvalidCharacter";
-})(ScanError || (ScanError = {}));
-var SyntaxKind;
-(function(SyntaxKind) {
-  SyntaxKind[SyntaxKind["OpenBraceToken"] = 1] = "OpenBraceToken";
-  SyntaxKind[SyntaxKind["CloseBraceToken"] = 2] = "CloseBraceToken";
-  SyntaxKind[SyntaxKind["OpenBracketToken"] = 3] = "OpenBracketToken";
-  SyntaxKind[SyntaxKind["CloseBracketToken"] = 4] = "CloseBracketToken";
-  SyntaxKind[SyntaxKind["CommaToken"] = 5] = "CommaToken";
-  SyntaxKind[SyntaxKind["ColonToken"] = 6] = "ColonToken";
-  SyntaxKind[SyntaxKind["NullKeyword"] = 7] = "NullKeyword";
-  SyntaxKind[SyntaxKind["TrueKeyword"] = 8] = "TrueKeyword";
-  SyntaxKind[SyntaxKind["FalseKeyword"] = 9] = "FalseKeyword";
-  SyntaxKind[SyntaxKind["StringLiteral"] = 10] = "StringLiteral";
-  SyntaxKind[SyntaxKind["NumericLiteral"] = 11] = "NumericLiteral";
-  SyntaxKind[SyntaxKind["LineCommentTrivia"] = 12] = "LineCommentTrivia";
-  SyntaxKind[SyntaxKind["BlockCommentTrivia"] = 13] = "BlockCommentTrivia";
-  SyntaxKind[SyntaxKind["LineBreakTrivia"] = 14] = "LineBreakTrivia";
-  SyntaxKind[SyntaxKind["Trivia"] = 15] = "Trivia";
-  SyntaxKind[SyntaxKind["Unknown"] = 16] = "Unknown";
-  SyntaxKind[SyntaxKind["EOF"] = 17] = "EOF";
-})(SyntaxKind || (SyntaxKind = {}));
-var parse2 = parse;
-var ParseErrorCode;
-(function(ParseErrorCode) {
-  ParseErrorCode[ParseErrorCode["InvalidSymbol"] = 1] = "InvalidSymbol";
-  ParseErrorCode[ParseErrorCode["InvalidNumberFormat"] = 2] = "InvalidNumberFormat";
-  ParseErrorCode[ParseErrorCode["PropertyNameExpected"] = 3] = "PropertyNameExpected";
-  ParseErrorCode[ParseErrorCode["ValueExpected"] = 4] = "ValueExpected";
-  ParseErrorCode[ParseErrorCode["ColonExpected"] = 5] = "ColonExpected";
-  ParseErrorCode[ParseErrorCode["CommaExpected"] = 6] = "CommaExpected";
-  ParseErrorCode[ParseErrorCode["CloseBraceExpected"] = 7] = "CloseBraceExpected";
-  ParseErrorCode[ParseErrorCode["CloseBracketExpected"] = 8] = "CloseBracketExpected";
-  ParseErrorCode[ParseErrorCode["EndOfFileExpected"] = 9] = "EndOfFileExpected";
-  ParseErrorCode[ParseErrorCode["InvalidCommentToken"] = 10] = "InvalidCommentToken";
-  ParseErrorCode[ParseErrorCode["UnexpectedEndOfComment"] = 11] = "UnexpectedEndOfComment";
-  ParseErrorCode[ParseErrorCode["UnexpectedEndOfString"] = 12] = "UnexpectedEndOfString";
-  ParseErrorCode[ParseErrorCode["UnexpectedEndOfNumber"] = 13] = "UnexpectedEndOfNumber";
-  ParseErrorCode[ParseErrorCode["InvalidUnicode"] = 14] = "InvalidUnicode";
-  ParseErrorCode[ParseErrorCode["InvalidEscapeCharacter"] = 15] = "InvalidEscapeCharacter";
-  ParseErrorCode[ParseErrorCode["InvalidCharacter"] = 16] = "InvalidCharacter";
-})(ParseErrorCode || (ParseErrorCode = {}));
-
-// index.ts
-function loadPluginConfig(directory) {
+function loadPluginConfig(directory: string): FallbackConfigOverrides {
   const configPaths = [
-    join2(directory, ".opencode", "opencode-fallback.json"),
-    join2(directory, ".opencode", "opencode-fallback.jsonc"),
-    join2(process.env.HOME || "", ".config", "opencode", "opencode-fallback.json"),
-    join2(process.env.HOME || "", ".config", "opencode", "opencode-fallback.jsonc")
+    join(directory, ".opencode", "opencode-fallback.json"),
+    join(directory, ".opencode", "opencode-fallback.jsonc"),
+    join(process.env.HOME || "", ".config", "opencode", "opencode-fallback.json"),
+    join(process.env.HOME || "", ".config", "opencode", "opencode-fallback.jsonc")
   ];
   for (const configPath of configPaths) {
     if (existsSync(configPath)) {
       try {
         const content = readFileSync(configPath, "utf-8");
-        return parse2(content);
+        return parseJsonc(content) ?? {};
       } catch (err) {
         logInfo(`[${PLUGIN_NAME}] Failed to parse config: ${configPath}`, err);
       }
@@ -3223,12 +2605,12 @@ function loadPluginConfig(directory) {
   }
   return {};
 }
-async function OpenCodeFallbackPlugin(ctx, configOverrides) {
-  let agentConfigs;
+async function OpenCodeFallbackPlugin(ctx: PluginInput, configOverrides?: FallbackConfigOverrides): Promise<Hooks> {
+  let agentConfigs: AgentConfigs | undefined;
   let fileConfig = loadPluginConfig(ctx.directory);
-  let mergedConfig;
+  let mergedConfig: FallbackConfig | undefined;
   const globalFallbackModels = normalizeFallbackModelsField(fileConfig.fallback_models);
-  const getConfig = () => {
+  const getConfig = (): FallbackConfig => {
     mergedConfig ??= {
       enabled: configOverrides?.enabled ?? fileConfig?.enabled ?? DEFAULT_CONFIG.enabled,
       retry_on_errors: configOverrides?.retry_on_errors ?? fileConfig?.retry_on_errors ?? DEFAULT_CONFIG.retry_on_errors,
@@ -3242,7 +2624,7 @@ async function OpenCodeFallbackPlugin(ctx, configOverrides) {
     };
     return mergedConfig;
   };
-  const deps = {
+  const deps: EngineDeps = {
     ctx,
     get config() {
       return getConfig();
@@ -3251,18 +2633,18 @@ async function OpenCodeFallbackPlugin(ctx, configOverrides) {
       return agentConfigs;
     },
     globalFallbackModels,
-    sessionStates: new Map,
-    sessionLastAccess: new Map,
-    sessionRetryInFlight: new Set,
-    sessionAwaitingFallbackResult: new Set,
-    sessionFallbackTimeouts: new Map,
-    sessionFirstTokenReceived: new Map,
-    sessionSelfAbortTimestamp: new Map,
-    sessionParentID: new Map,
-    sessionIdleResolvers: new Map,
-    sessionLastMessageTime: new Map,
-    sessionLastMessageModel: new Map,
-    sessionCompactionInFlight: new Set
+    sessionStates: new Map(),
+    sessionLastAccess: new Map(),
+    sessionRetryInFlight: new Set(),
+    sessionAwaitingFallbackResult: new Set(),
+    sessionFallbackTimeouts: new Map(),
+    sessionFirstTokenReceived: new Map(),
+    sessionSelfAbortTimestamp: new Map(),
+    sessionParentID: new Map(),
+    sessionIdleResolvers: new Map(),
+    sessionLastMessageTime: new Map(),
+    sessionLastMessageModel: new Map(),
+    sessionCompactionInFlight: new Set()
   };
   const helpers = createAutoRetryHelpers(deps);
   const { handleEvent: baseEventHandler, handleActivity } = createEventHandler(deps, helpers);
@@ -3272,8 +2654,7 @@ async function OpenCodeFallbackPlugin(ctx, configOverrides) {
   cleanupInterval.unref();
   logInfo(`Plugin initialized (${globalFallbackModels.length} global fallback model(s) configured)`);
   return {
-    name: PLUGIN_NAME,
-    config: (opencodeConfig) => {
+    config: async (opencodeConfig: any) => {
       const agentsValue = opencodeConfig.agents;
       const agentValue = opencodeConfig.agent;
       if (agentsValue && typeof agentsValue === "object" && !Array.isArray(agentsValue)) {
@@ -3287,6 +2668,8 @@ async function OpenCodeFallbackPlugin(ctx, configOverrides) {
     },
     event: async ({
       event
+    }: {
+      event: any;
     }) => {
       if (event.type === "message.updated") {
         if (!deps.config.enabled)
@@ -3306,7 +2689,7 @@ async function OpenCodeFallbackPlugin(ctx, configOverrides) {
       }
       await baseEventHandler({ event });
     },
-    "tool.execute.after": async (input, output) => {
+    "tool.execute.after": async (input: any, output: any) => {
       if (input.tool !== "task" || !isEmptyTaskResult(output.output)) {
         return;
       }
@@ -3341,7 +2724,7 @@ async function OpenCodeFallbackPlugin(ctx, configOverrides) {
         });
       }
     },
-    "chat.message": async (input, output) => {
+    "chat.message": async (input: any, output: any) => {
       await chatMessageHandler(input, output);
     }
   };
