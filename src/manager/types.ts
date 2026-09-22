@@ -78,6 +78,13 @@ export interface RouterSettings {
   zenRoutingMode?: RouterRoutingMode;
   /** Unified routing engine configuration. */
   routing?: UnifiedRoutingConfig;
+  /** Ordered provider-level fallback lists per agent tier (orchestrator + fast/medium/heavy). */
+  providerFallbacks: {
+    orchestrator: string[];
+    fast: string[];
+    medium: string[];
+    heavy: string[];
+  };
 }
 
 export type TierName = "fast" | "medium" | "heavy";

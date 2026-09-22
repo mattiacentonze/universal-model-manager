@@ -35,11 +35,20 @@ export function buildAgentConfig(router: RouterSettings): NonNullable<Config["ag
   const steps = { fast: 32, medium: 64, heavy: 128 } as const;
   for (const tier of ["fast", "medium", "heavy"] as const) {
     const chain = router.tiers[tier];
+    const providerFallbacks = router.providerFallbacks?.[tier] ?? [];
+    const modelFallbacks = tierTargets(chain).map((t) => t.model);
+    // Add provider-level fallbacks as model ids where the provider matches a known model.
+    for (const provider of providerFallbacks) {
+      if (!modelFallbacks.some((m) => m.startsWith(`${provider}/`))) {
+        const match = [chain.model, ...modelFallbacks].find((m) => m.startsWith(`${provider}/`));
+        if (match) modelFallbacks.push(match);
+      }
+    }
     agents[tier] = {
       model: chain.model,
       mode: "subagent",
       description: `${tier} delegation tier (${chain.model})`,
-      fallback_models: tierTargets(chain).map((t) => t.model),
+      fallback_models: [...new Set(modelFallbacks)],
       steps: steps[tier],
       ...(chain.variant ? { variant: chain.variant } : {}),
     };

@@ -303,7 +303,10 @@ describe("Tier chain schema validation & canonical targets", () => {
     expect(agent.fast?.model).toBe(cfg.router.tiers.fast.model);
     expect(agent.medium?.variant).toBe("medium");
     expect(agent.medium?.mode).toBe("subagent");
-    expect(agent.heavy?.fallback_models).toEqual(tierTargets(cfg.router.tiers.heavy).map((t) => t.model));
+    expect(agent.heavy?.fallback_models).toEqual([
+      ...tierTargets(cfg.router.tiers.heavy).map((t) => t.model),
+      cfg.router.tiers.heavy.model,
+    ]);
     expect(agent.build?.fallback_models).toContain(cfg.router.tiers.heavy.model);
   });
 });

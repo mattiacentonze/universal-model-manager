@@ -1,13 +1,7 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import type { AccountProvider, ProviderAccount } from "./provider-accounts.js";
-import {
-  getAntigravityAccounts,
-  getOpenAIAccounts,
-  getOpenCodeZenAccounts,
-  isOpencodeConfigured,
-} from "./provider-accounts.js";
+import { getOpenCodeZenAccounts } from "./provider-accounts.js";
+import { getAdapter } from "./provider-adapter.js";
 import type { AccountEntry, ProviderKind } from "./types.js";
 
 /**
@@ -19,10 +13,8 @@ import type { AccountEntry, ProviderKind } from "./types.js";
  * `configured` is derived strictly from the presence of real credentials.
  */
 export function realAccounts(kind: ProviderKind, configDir = getOpenCodeConfigDir()): ProviderAccount[] {
-  if (kind === "openai") return getOpenAIAccounts(configDir);
-  if (kind === "antigravity") return getAntigravityAccounts(configDir);
   if (kind === "opencode") return getOpenCodeZenAccounts(configDir);
-  return [];
+  return getAdapter(kind).list(configDir);
 }
 
 /**
@@ -37,20 +29,7 @@ export function countRealAccounts(kind: ProviderKind, configDir = getOpenCodeCon
  * Whether a provider has at least one real credentialed account at runtime.
  */
 export function providerConfigured(kind: ProviderKind, configDir = getOpenCodeConfigDir()): boolean {
-  if (kind === "chatgpt-web") {
-    // ChatGPT web session is tracked separately by the bridge session store.
-    const stateFile = join(getUniversalDataDir(configDir), "chatgpt-storage-state.json");
-    return !!existsSync(stateFile);
-  }
-  if (kind === "opencode") {
-    return isOpencodeConfigured(configDir);
-  }
-  return realAccounts(kind, configDir).some((a) => a.configured);
-}
-
-function getUniversalDataDir(configDir: string): string {
-  if (process.env.OPENCODE_UNIVERSAL_AUTH_DIR) return process.env.OPENCODE_UNIVERSAL_AUTH_DIR;
-  return join(configDir, "universal-auth");
+  return getAdapter(kind).configured(configDir);
 }
 
 function kindOf(provider: AccountProvider): ProviderKind {
@@ -71,18 +50,23 @@ export function reconcileConfigured(accounts: AccountEntry[], configDir = getOpe
     ...realAccounts("opencode", configDir).filter((a) => a.configured),
   ];
   const webAccounts = accounts.filter((a) => a.kind === "chatgpt-web");
-  // Preserve user-chosen aliases by matching on kind + label (stable real-store identity).
-  const aliasByKey = new Map<string, string>();
+  // Preserve user-chosen aliases by the STABLE account id (not kind+label, which
+  // is non-unique when two accounts share a label and caused removed aliases to
+  // reappear after restart).
+  const aliasById = new Map<string, string>();
   for (const a of accounts) {
-    if (a.alias) aliasByKey.set(`${a.kind}:${a.label}`, a.alias);
+    if (a.alias) aliasById.set(a.id, a.alias);
   }
   const mirrored: AccountEntry[] = real.map((r) => {
     const kind = kindOf(r.provider);
+    const userAlias = aliasById.get(r.id);
+    // Default alias = email when the account has one and no user alias is set.
+    const alias = userAlias ?? (r.email ? r.email : undefined);
     return {
       id: r.id,
       kind,
       label: r.label,
-      alias: aliasByKey.get(`${kind}:${r.label}`),
+      alias,
       main: r.main,
       configured: r.configured,
     };

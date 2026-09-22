@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
-import { importFromChromeProfile, listChromeProfiles } from "../chatgpt-web/chrome-importer.js";
 import {
+  type AccountEntry,
   completeStep,
+  dedupeAliases,
   loadConfig,
+  type ProviderKind,
   type RouterRoutingMode,
   resetManager,
   saveConfig,
@@ -16,9 +18,11 @@ import {
   getAccounts,
   loginActionFor,
   type NativeAction,
+  reorderByManagerIds,
   routingModeAction,
   setMainByManagerId,
 } from "../manager/provider-accounts.js";
+import { allAdapters, getAdapter } from "../manager/provider-adapter.js";
 import { findPortFile } from "../manager/quota-poller.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
 import { dispatchNative } from "./native.js";
@@ -87,42 +91,6 @@ async function _applyRpcCommandSilently(provider: "antigravity" | "openai", comm
 
 /** OpenAI routing preference via the native /openai-routing command. */
 const _openaiRouting = (): NativeAction => ({ ...routingModeAction("main-first"), command: "/openai-routing" });
-
-/** Rename a manager account's alias (used in fallback targets and the right column). */
-function _renameAccountAlias(api: Api) {
-  const accounts = cfg().accounts;
-  openDialog(api, () => (
-    <api.ui.DialogSelect
-      title="Rename account alias"
-      placeholder="Select account"
-      options={[
-        ...accounts.map((a) => ({
-          title: `${a.alias ?? a.label} (${a.kind})`,
-          value: a.id,
-          onSelect: () => {
-            openDialog(api, () => (
-              <api.ui.DialogPrompt
-                title={`Rename alias for ${a.label}`}
-                placeholder="alias"
-                value={a.alias ?? ""}
-                onCancel={() => _renameAccountAlias(api)}
-                onConfirm={(alias) => {
-                  const c = cfg();
-                  const acc = c.accounts.find((x) => x.id === a.id);
-                  if (acc) acc.alias = alias.trim() || undefined;
-                  saveConfig(c);
-                  api.ui.toast({ variant: "success", title: "Alias renamed", message: RESTART });
-                  accountsSettings(api);
-                }}
-              />
-            ));
-          },
-        })),
-        { title: "Back", value: "__back", onSelect: () => accountsSettings(api) },
-      ]}
-    />
-  ));
-}
 
 /** Validate a model id and return a friendly error string, or null when valid. */
 function modelError(id: string): string | null {
@@ -381,254 +349,237 @@ export function setRouterRoutingMode(
 }
 
 /**
- * Consolidated account & routing management dialog:
- * Actionable cards for each Google and OpenAI account, alias management,
- * native OAuth login triggers, and live routing mode controls.
+ * Generic 3-level account management dialog, provider-agnostic:
+ *   Level 1 (providers) -> Level 2 (accounts of a provider, priority order)
+ *   -> Level 3 (per-account actions).
+ * All providers share one code path via the adapter registry.
  */
+
+/** Reorder an account by `delta` positions within its own provider's slice of cfg.accounts. */
+function moveAccount(cfg: ReturnType<typeof loadConfig>, accountId: string, delta: number): AccountEntry[] {
+  const accounts = [...cfg.accounts];
+  const idx = accounts.findIndex((a) => a.id === accountId);
+  if (idx === -1) return accounts;
+  const kind = accounts[idx].kind;
+  const kindIdx = accounts.findIndex((a) => a.kind === kind);
+  const kindEnd = accounts.findIndex((a, i) => i > kindIdx && a.kind !== kind);
+  const sliceStart = kindIdx;
+  const sliceEnd = kindEnd === -1 ? accounts.length : kindEnd;
+  const rel = idx - sliceStart;
+  const target = rel + delta;
+  if (target < 0 || target >= sliceEnd - sliceStart) return accounts;
+  const slice = accounts.slice(sliceStart, sliceEnd);
+  const [moved] = slice.splice(rel, 1);
+  slice.splice(target, 0, moved);
+  return [...accounts.slice(0, sliceStart), ...slice, ...accounts.slice(sliceEnd)];
+}
+
+/** Level 3: per-account actions (rename, move, delete, set main). */
+function accountActions(api: Api, kind: ProviderKind, accountId: string) {
+  const refresh = () => accountActions(api, kind, accountId);
+  const back = () => providerAccounts(api, kind);
+  const account = cfg().accounts.find((a) => a.id === accountId);
+  if (!account) {
+    back();
+    return;
+  }
+  const title = `${account.alias ? `[${account.alias}] ` : ""}${account.label}`;
+  const accountsOfKind = cfg().accounts.filter((a) => a.kind === kind);
+  const index = accountsOfKind.findIndex((a) => a.id === accountId);
+  const isFirst = index === 0;
+  const isLast = index === accountsOfKind.length - 1;
+
+  const persistOrder = (next: AccountEntry[]) => {
+    const orderedIds = next.filter((a) => a.kind === kind).map((a) => a.id);
+    const c = cfg();
+    c.accounts = next;
+    saveConfig(c);
+    void reorderByManagerIds(configDir(), orderedIds).then((res) => {
+      if (res.kind === "delegate") {
+        dispatchNative(api, res.action).then((r) => toastResult(api, r));
+      } else {
+        api.ui.toast({ variant: res.kind === "applied" ? "success" : "error", title: "Reorder", message: res.text });
+      }
+    });
+  };
+
+  openDialog(api, () => (
+    <api.ui.DialogSelect
+      title={title}
+      placeholder="Select action"
+      options={[
+        ...(!account.main
+          ? [
+              {
+                title: "Set as main account",
+                value: "set-main",
+                description: `Designate ${account.label} as the primary active account`,
+                onSelect: async () => {
+                  await setMainByManagerId(configDir(), accountId);
+                  api.ui.toast({
+                    variant: "success",
+                    title: "Main account updated",
+                    message: `${account.label} is now main.`,
+                  });
+                  refresh();
+                },
+              },
+            ]
+          : []),
+        {
+          title: `Rename alias (current: ${account.alias || "none"})`,
+          value: "rename-alias",
+          description: "Set a short identifier used in fallback chains (e.g. work, personal)",
+          onSelect: () => {
+            openDialog(api, () => (
+              <api.ui.DialogPrompt
+                title={`Rename alias for ${account.label}`}
+                placeholder="alias (e.g. work, personal)"
+                value={account.alias ?? ""}
+                onCancel={refresh}
+                onConfirm={(alias) => {
+                  const c = cfg();
+                  const acc = c.accounts.find((x) => x.id === accountId);
+                  if (acc) acc.alias = alias.trim() || undefined;
+                  c.accounts = dedupeAliases(c.accounts);
+                  saveConfig(c);
+                  api.ui.toast({ variant: "success", title: "Alias updated", message: RESTART });
+                  refresh();
+                }}
+              />
+            ));
+          },
+        },
+        ...(!isFirst
+          ? [
+              {
+                title: "Move up",
+                value: "move-up",
+                description: "Increase this account's priority",
+                onSelect: () => {
+                  persistOrder(moveAccount(cfg(), accountId, -1));
+                  api.ui.toast({ variant: "success", title: "Account moved up", message: RESTART });
+                  refresh();
+                },
+              },
+            ]
+          : []),
+        ...(!isLast
+          ? [
+              {
+                title: "Move down",
+                value: "move-down",
+                description: "Decrease this account's priority",
+                onSelect: () => {
+                  persistOrder(moveAccount(cfg(), accountId, 1));
+                  api.ui.toast({ variant: "success", title: "Account moved down", message: RESTART });
+                  refresh();
+                },
+              },
+            ]
+          : []),
+        {
+          title: "Delete account",
+          value: "delete",
+          description: "Remove this account from the manager",
+          onSelect: () => {
+            openDialog(api, () => (
+              <api.ui.DialogConfirm
+                title={`Delete ${title}?`}
+                message={`Remove ${account.label} from the manager account list?`}
+                onConfirm={() => {
+                  const c = cfg();
+                  c.accounts = c.accounts.filter((a) => a.id !== accountId);
+                  saveConfig(c);
+                  api.ui.toast({ variant: "success", title: "Account removed", message: RESTART });
+                  back();
+                }}
+                onCancel={refresh}
+              />
+            ));
+          },
+        },
+        { title: "< Back", value: "__back", onSelect: back },
+      ]}
+    />
+  ));
+}
+
+/** Level 2: accounts of one provider in priority order (main first, then fallbacks). */
+function providerAccounts(api: Api, kind: ProviderKind) {
+  const adapter = getAdapter(kind);
+  const accounts = cfg().accounts.filter((a) => a.kind === kind);
+  const ordered = [...accounts].sort((a, b) => Number(b.main) - Number(a.main));
+
+  openDialog(api, () => (
+    <api.ui.DialogSelect
+      title={`${adapter.displayName} accounts`}
+      placeholder="Select account"
+      options={[
+        ...ordered.map((a, i) => ({
+          title: `${a.alias ? `[${a.alias}] ` : ""}${a.label}${a.main ? " (main)" : ""}`,
+          value: a.id,
+          description: `Priority ${i + 1} — click to manage`,
+          onSelect: () => accountActions(api, kind, a.id),
+        })),
+        { title: "< Back", value: "__back", onSelect: () => accountsSettings(api) },
+      ]}
+    />
+  ));
+}
+
+/** Level 1: providers that have at least one account, plus "Add a new account". */
 export function accountsSettings(api: Api) {
   const accounts = cfg().accounts;
+  const kinds = [...new Set(accounts.map((a) => a.kind))];
   const refresh = () => accountsSettings(api);
 
-  const googleAccounts = accounts.filter((a) => a.kind === "antigravity");
-  const openaiAccounts = accounts.filter((a) => a.kind === "openai");
-  const webAccounts = accounts.filter((a) => a.kind === "chatgpt-web");
-
-  const openAccountActions = (a: (typeof accounts)[0]) => {
-    const providerName = a.kind === "antigravity" ? "Google" : a.kind === "openai" ? "OpenAI" : "ChatGPT Web";
+  const addAccount = () => {
     openDialog(api, () => (
       <api.ui.DialogSelect
-        title={`[${providerName}] ${a.alias ? `[${a.alias}] ` : ""}${a.label}`}
-        placeholder="Select action"
+        title="Add a new account"
+        placeholder="Select provider"
         options={[
-          ...(!a.main
-            ? [
-                {
-                  title: "Set as main account",
-                  value: `main-${a.id}`,
-                  description: `Designate ${a.label} as the primary active account for ${providerName}`,
-                  onSelect: async () => {
-                    await setMainByManagerId(configDir(), a.id);
-                    api.ui.toast({
-                      variant: "success",
-                      title: "Main account updated",
-                      message: `${a.label} is now main.`,
-                    });
-                    refresh();
-                  },
-                },
-              ]
-            : [
-                {
-                  title: "Active main account (already set)",
-                  value: "is-main",
-                  description: "This is currently the active main account for this provider.",
-                },
-              ]),
-          {
-            title: `Rename alias (current: ${a.alias || "none"})`,
-            value: "rename-alias",
-            description: "Set a short identifier used in fallback chains (e.g. work, personal)",
+          ...allAdapters().map((adapter) => ({
+            title: adapter.displayName,
+            value: adapter.kind,
+            description: "Run the native login flow to add an account",
             onSelect: () => {
-              openDialog(api, () => (
-                <api.ui.DialogPrompt
-                  title={`Rename alias for ${a.label}`}
-                  placeholder="alias (e.g. work, personal)"
-                  value={a.alias ?? ""}
-                  onCancel={refresh}
-                  onConfirm={(alias) => {
-                    const c = cfg();
-                    const acc = c.accounts.find((x) => x.id === a.id);
-                    if (acc) acc.alias = alias.trim() || undefined;
-                    saveConfig(c);
-                    api.ui.toast({ variant: "success", title: "Alias updated", message: RESTART });
-                    refresh();
-                  }}
-                />
-              ));
+              dispatchNative(api, adapter.loginAction()).then((res) => {
+                toastResult(api, res);
+                refresh();
+              });
             },
-          },
-          ...(a.alias
-            ? [
-                {
-                  title: "Remove alias",
-                  value: "remove-alias",
-                  description: "Clear the custom alias for this account",
-                  onSelect: () => {
-                    const c = cfg();
-                    const acc = c.accounts.find((x) => x.id === a.id);
-                    if (acc) acc.alias = undefined;
-                    saveConfig(c);
-                    api.ui.toast({ variant: "success", title: "Alias removed", message: RESTART });
-                    refresh();
-                  },
-                },
-              ]
-            : []),
-          {
-            title: "< Back",
-            value: "__back",
-            onSelect: refresh,
-          },
+          })),
+          { title: "< Back", value: "__back", onSelect: refresh },
         ]}
       />
     ));
   };
 
-  const options: { title: string; value: string; onSelect?: () => void; description?: string }[] = [];
-
-  // 1. Google accounts
-  for (const a of googleAccounts) {
-    options.push({
-      title: `Google: ${a.alias ? `[${a.alias}] ` : ""}${a.label}${a.main ? " (main)" : ""}`,
-      value: a.id,
-      description: `Status: ${a.configured ? "ready" : "pending login"} | Click to manage alias or main`,
-      onSelect: () => openAccountActions(a),
-    });
-  }
-  options.push({
-    title: "+ Login to Google account",
-    value: "login-google",
-    description: "Authenticate a new Google account via OAuth",
-    onSelect: () => {
-      dispatchNative(api, loginActionFor("antigravity")).then((res) => {
-        toastResult(api, res);
-        refresh();
-      });
-    },
-  });
-  const currentGoogleRouting = getGoogleRoutingMode();
-  options.push({
-    title: `Google routing mode: ${currentGoogleRouting}`,
-    value: "routing-google",
-    description: "Click to select mode: Main first, Round robin, Fallback first, Balanced",
-    onSelect: () => openRoutingSelector(api, "google", refresh),
-  });
-
-  // 2.5 General Model Manager routing
-  const currentRouterRouting = cfg().router.routingMode ?? "main-first";
-  options.push({
-    title: `Model Manager routing mode: ${currentRouterRouting}`,
-    value: "routing-manager",
-    description: "Click to select mode: Main first, Round robin, Fallback first, Balanced",
-    onSelect: () => openRoutingSelector(api, "manager", refresh),
-  });
-
-  // 2. OpenAI accounts
-  for (const a of openaiAccounts) {
-    options.push({
-      title: `OpenAI: ${a.alias ? `[${a.alias}] ` : ""}${a.label}${a.main ? " (main)" : ""}`,
-      value: a.id,
-      description: `Status: ${a.configured ? "ready" : "pending login"} | Click to manage alias or main`,
-      onSelect: () => openAccountActions(a),
-    });
-  }
-  options.push({
-    title: "+ Login to OpenAI account",
-    value: "login-openai",
-    description: "Authenticate a new OpenAI/ChatGPT account via OAuth",
-    onSelect: () => {
-      dispatchNative(api, loginActionFor("openai")).then((res) => {
-        toastResult(api, res);
-        refresh();
-      });
-    },
-  });
-  const currentOpenAIRouting = getOpenAIRoutingMode();
-  options.push({
-    title: `OpenAI routing mode: ${currentOpenAIRouting}`,
-    value: "routing-openai",
-    description: "Click to select mode: Main first, Round robin, Fallback first, Balanced",
-    onSelect: () => openRoutingSelector(api, "openai", refresh),
-  });
-
-  // 3. ChatGPT Web accounts
-  for (const a of webAccounts) {
-    options.push({
-      title: `ChatGPT Web: ${a.alias ? `[${a.alias}] ` : ""}${a.label}`,
-      value: a.id,
-      description: "Local ChatGPT browser bridge session",
-      onSelect: () => openAccountActions(a),
-    });
-  }
-  options.push({
-    title: webAccounts.length === 0 ? "+ Connect ChatGPT Web Chrome profile" : "Switch ChatGPT Web Chrome profile",
-    value: "login-chatgpt-web",
-    description: "Select which Google Chrome profile to link with ChatGPT Web",
-    onSelect: () => {
-      const chromeProfiles = listChromeProfiles();
-      if (chromeProfiles.length > 0) {
-        openDialog(api, () => (
-          <api.ui.DialogSelect
-            title="Select Chrome Profile for ChatGPT Web"
-            placeholder="Choose profile"
-            options={[
-              ...chromeProfiles.map((p) => ({
-                title: `${p.name} (${p.email || p.folder})`,
-                value: p.folder,
-                description: p.hasSession ? "Active ChatGPT session found" : "No active session in this profile",
-                onSelect: () => {
-                  const res = importFromChromeProfile(p.folder);
-                  if (res.ok) {
-                    api.ui.toast({
-                      variant: "success",
-                      title: "ChatGPT Web",
-                      message: `Connected to ${p.name} (${p.email || p.folder})`,
-                    });
-                  } else {
-                    api.ui.toast({ variant: "error", title: "ChatGPT Web", message: res.error || "Import failed" });
-                  }
-                  refresh();
-                },
-              })),
-              { title: "< Back", value: "__back", onSelect: () => refresh() },
-            ]}
-          />
-        ));
-      } else {
-        dispatchNative(api, loginActionFor("chatgpt-web")).then((res) => {
-          toastResult(api, res);
-          refresh();
-        });
-      }
-    },
-  });
-
-  // 4. OpenCode Zen accounts
-  const zenAccounts = accounts.filter((a) => a.kind === "opencode");
-  for (const a of zenAccounts) {
-    options.push({
-      title: `OpenCode Zen: ${a.alias ? `[${a.alias}] ` : ""}${a.label}`,
-      value: a.id,
-      description: `Status: ${a.configured ? "ready (big-pickle)" : "pending login"} | Click to manage alias`,
-      onSelect: () => openAccountActions(a),
-    });
-  }
-  options.push({
-    title: `OpenCode Zen routing mode: ${currentRouterRouting}`,
-    value: "routing-opencode",
-    description: "Click to select mode: Main first, Round robin, Fallback first, Balanced",
-    onSelect: () => openRoutingSelector(api, "opencode", refresh),
-  });
-
-  // 5. Shortcut to fallback chains
-  options.push({
-    title: "-> Configure Fallback Chains (/fallback-list)",
-    value: "__to_fallbacks",
-    description: "Open the router and fallback chain editor",
-    onSelect: () => routerSettings(api),
-  });
-
-  options.push({
-    title: "Close",
-    value: "close",
-    onSelect: () => api.ui.dialog.clear(),
-  });
-
   openDialog(api, () => (
     <api.ui.DialogSelect
-      title="Accounts & Routing Management"
-      placeholder="Select an account or action"
-      options={options}
+      title="Accounts"
+      placeholder="Select a provider or action"
+      options={[
+        {
+          title: "Add a new account",
+          value: "__add",
+          description: "Login to a provider via the native connect flow",
+          onSelect: addAccount,
+        },
+        ...kinds.map((kind) => {
+          const adapter = getAdapter(kind);
+          const count = accounts.filter((a) => a.kind === kind).length;
+          return {
+            title: adapter.displayName,
+            value: kind,
+            description: `${count} account${count === 1 ? "" : "s"} — click to manage`,
+            onSelect: () => providerAccounts(api, kind),
+          };
+        }),
+        { title: "Close", value: "close", onSelect: () => api.ui.dialog.clear() },
+      ]}
     />
   ));
 }
@@ -1554,6 +1505,126 @@ export function routerSettings(api: Api) {
 
 export function openWizard(api: Api) {
   openWizardAfter(api);
+}
+
+/** Move an element in a list by a signed delta, returning a new array. */
+function moveInList<T>(list: T[], index: number, delta: number): T[] {
+  const next = [...list];
+  const target = index + delta;
+  if (target < 0 || target >= next.length) return next;
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+/** Per-tier provider fallback list editor (ordered providers). */
+function editProviderList(api: Api, tier: "orchestrator" | "fast" | "medium" | "heavy") {
+  const list = [...(cfg().router.providerFallbacks?.[tier] ?? [])];
+
+  const commit = (next: string[]) => {
+    const c = cfg();
+    c.router = {
+      ...c.router,
+      providerFallbacks: { ...c.router.providerFallbacks, [tier]: next },
+    };
+    saveConfig(c);
+    api.ui.toast({ variant: "success", title: "Provider fallbacks updated", message: RESTART });
+    editProviderList(api, tier);
+  };
+
+  openDialog(api, () => (
+    <api.ui.DialogSelect
+      title={`${tier}: provider fallbacks (${list.length})`}
+      placeholder="Select option"
+      options={[
+        {
+          title: "+ Add provider",
+          value: "__add",
+          onSelect: () => {
+            openDialog(api, () => (
+              <api.ui.DialogPrompt
+                title={`${tier}: add provider`}
+                description={() => <text>Enter a provider name (e.g. google).</text>}
+                placeholder="provider"
+                onCancel={() => editProviderList(api, tier)}
+                onConfirm={(name) => {
+                  const trimmed = name.trim();
+                  if (!trimmed) {
+                    errorToast(api, "Provider name is required.");
+                    return;
+                  }
+                  commit([...list, trimmed]);
+                }}
+              />
+            ));
+          },
+        },
+        ...list.map((provider, i) => ({
+          title: `${i + 1}: ${provider}`,
+          value: provider,
+          description: provider,
+          onSelect: () => {
+            const sub: { title: string; value: string; onSelect?: () => void }[] = [
+              ...(i > 0
+                ? [
+                    {
+                      title: "Move up",
+                      value: "up",
+                      onSelect: () => commit(moveInList(list, i, -1)),
+                    },
+                  ]
+                : []),
+              ...(i < list.length - 1
+                ? [
+                    {
+                      title: "Move down",
+                      value: "down",
+                      onSelect: () => commit(moveInList(list, i, 1)),
+                    },
+                  ]
+                : []),
+              {
+                title: "Remove",
+                value: "remove",
+                onSelect: () => commit(list.filter((_, j) => j !== i)),
+              },
+              {
+                title: "< Back",
+                value: "__back",
+                onSelect: () => editProviderList(api, tier),
+              },
+            ];
+            openDialog(api, () => (
+              <api.ui.DialogSelect title={`${i + 1}: ${provider}`} placeholder="Select action" options={sub} />
+            ));
+          },
+        })),
+        {
+          title: "< Back",
+          value: "__back",
+          onSelect: () => fallbackSettings(api),
+        },
+      ]}
+    />
+  ));
+}
+
+/** Settings: per-tier provider-level fallback lists. */
+export function fallbackSettings(api: Api) {
+  const pf = cfg().router.providerFallbacks;
+  openDialog(api, () => (
+    <api.ui.DialogSelect
+      title="Provider fallbacks"
+      placeholder="Select tier"
+      options={[
+        ...(["orchestrator", "fast", "medium", "heavy"] as const).map((t) => ({
+          title: `${t.toUpperCase()}: ${(pf?.[t] ?? []).join(", ") || "-"}`,
+          value: t,
+          onSelect: () => editProviderList(api, t),
+        })),
+        { title: "Close", value: "close", onSelect: () => api.ui.dialog.clear() },
+      ]}
+    />
+  ));
 }
 
 export function showReset(api: Api) {

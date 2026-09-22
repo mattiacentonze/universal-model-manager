@@ -95,6 +95,12 @@ export const DEFAULT_ROUTER: RouterSettings = {
   enabled: true,
   routingMode: "main-first",
   routing: structuredClone(DEFAULT_UNIFIED_ROUTING),
+  providerFallbacks: {
+    orchestrator: ["iit", "google", "openai"],
+    fast: ["iit", "google", "openai"],
+    medium: ["google", "openai", "iit"],
+    heavy: ["google", "openai", "iit"],
+  },
   tiers: {
     fast: { ...DEFAULT_CHAIN, model: DEEPSEEK, fallback: [GEMINI] },
     medium: {
@@ -199,12 +205,22 @@ function isRoutingConfig(v: unknown): v is UnifiedRoutingConfig {
   return true;
 }
 
+function isProviderFallbacks(v: unknown): v is RouterSettings["providerFallbacks"] {
+  if (typeof v !== "object" || v === null) return false;
+  const pf = v as Record<string, unknown>;
+  const keys = ["orchestrator", "fast", "medium", "heavy"];
+  return keys.every(
+    (k) => Array.isArray(pf[k]) && (pf[k] as unknown[]).every((p) => typeof p === "string" && p.length > 0),
+  );
+}
+
 function isRouter(v: unknown): v is RouterSettings {
   if (typeof v !== "object" || v === null) return false;
   const r = v as Record<string, unknown>;
   if (typeof r.orchestrator !== "string") return false;
   if (r.orchestrator !== "" && !isValidModelId(r.orchestrator)) return false;
   if (typeof r.enabled !== "boolean") return false;
+  if (r.providerFallbacks !== undefined && !isProviderFallbacks(r.providerFallbacks)) return false;
   if (
     r.routingMode !== undefined &&
     !["main-first", "sticky", "sticky-balanced", "fallback-first", "round-robin", "balanced"].includes(
@@ -292,6 +308,10 @@ export function validateConfig(input: unknown): ManagerConfig {
   } else if (!router.routing.parameters) {
     router.routing.parameters = defaultParametersForMode(router.routing.mode);
   }
+  // Automatic migration: populate provider-level fallback lists from defaults if missing.
+  if (router.providerFallbacks === undefined) {
+    router.providerFallbacks = structuredClone(DEFAULT_ROUTER.providerFallbacks);
+  }
   const wizardRaw = raw.wizard;
   if (wizardRaw !== undefined && wizardRaw !== null && !isWizard(wizardRaw)) {
     throw new Error("[Manager] Invalid wizard state. Refusing to overwrite user data.");
@@ -331,6 +351,8 @@ export function loadConfig(dir = getUniversalAuthDataDir(), configDir = getOpenC
   }
   // `configured` always mirrors the real underlying credential stores.
   cfg.accounts = reconcileConfigured(cfg.accounts, configDir);
+  // Never allow two accounts of the same provider to share an alias.
+  cfg.accounts = dedupeAliases(cfg.accounts);
   return cfg;
 }
 
@@ -380,6 +402,28 @@ export function setTierTargets(chain: TierChain, targets: FallbackTarget[]): Tie
     targets.filter((t) => t.variant).map((t) => [t.model, t.variant as string]),
   );
   return { ...chain, targets: targets.map((t) => ({ ...t })), fallback, fallbackVariants };
+}
+
+/**
+ * Enforce alias uniqueness per provider kind: if two accounts of the same kind
+ * share an alias, keep it on the first (by list order) and append " (1)",
+ * " (2)", ... to the later ones. Returns a new array; does not mutate input.
+ */
+export function dedupeAliases(accounts: AccountEntry[]): AccountEntry[] {
+  const used = new Map<string, Set<string>>();
+  return accounts.map((a) => {
+    if (!a.alias) return a;
+    const taken = used.get(a.kind) ?? new Set<string>();
+    let alias = a.alias;
+    let n = 1;
+    while (taken.has(alias)) {
+      alias = `${a.alias} (${n})`;
+      n += 1;
+    }
+    taken.add(alias);
+    used.set(a.kind, taken);
+    return { ...a, alias };
+  });
 }
 
 function anyProviderConfigured(configDir: string): boolean {

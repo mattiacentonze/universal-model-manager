@@ -191,6 +191,33 @@ export async function handleManagerCommand(
       }
       return { text: lines.join("\n") };
     }
+    case "u-fallback": {
+      const cfg = cfgWithConfigDir(dir, configDir);
+      const tier = parts[0] as "orchestrator" | "fast" | "medium" | "heavy" | undefined;
+      const providers = parts.slice(1);
+      if (!tier) {
+        const lines = ["Provider-level fallback lists:"];
+        for (const t of ["orchestrator", "fast", "medium", "heavy"] as const) {
+          lines.push(`  ${t}: ${(cfg.router.providerFallbacks?.[t] ?? []).join(", ") || "-"}`);
+        }
+        return { text: lines.join("\n") };
+      }
+      if (!["orchestrator", "fast", "medium", "heavy"].includes(tier)) {
+        return { text: "[Manager] Usage: /u-fallback <orchestrator|fast|medium|heavy> <provider> [provider...]" };
+      }
+      if (providers.length === 0 || providers.some((p) => !p.trim())) {
+        return { text: "[Manager] Usage: /u-fallback <orchestrator|fast|medium|heavy> <provider> [provider...]" };
+      }
+      cfg.router = {
+        ...cfg.router,
+        providerFallbacks: {
+          ...cfg.router.providerFallbacks,
+          [tier]: providers.map((p) => p.trim()),
+        },
+      };
+      saveConfig(cfg, dir);
+      return { text: `[Manager] ${tier} provider fallbacks set to: ${providers.join(", ")}.` };
+    }
     default:
       return null;
   }

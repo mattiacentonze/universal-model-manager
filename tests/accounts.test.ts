@@ -234,7 +234,7 @@ describe("Unified manager-facing interface", () => {
     expect(antiMain?.email).toBe("b@x");
   });
 
-  it("reconcileConfigured preserves user-chosen account aliases by kind+label", () => {
+  it("reconcileConfigured preserves user-chosen account aliases by stable id and defaults to email", () => {
     const real = getAccounts(dir);
     const stored = real.map((r) => ({
       id: r.id,
@@ -246,7 +246,8 @@ describe("Unified manager-facing interface", () => {
     }));
     const reconciled = reconcileConfigured(stored, dir);
     expect(reconciled.find((a) => a.label === "a@x")?.alias).toBe("work");
-    expect(reconciled.find((a) => a.label === "b@x")?.alias).toBeUndefined();
+    // No user alias -> default alias is the account email.
+    expect(reconciled.find((a) => a.label === "b@x")?.alias).toBe("b@x");
   });
 
   it("setMainByManagerId: antigravity applies, OpenAI primary delegates (no false success)", async () => {

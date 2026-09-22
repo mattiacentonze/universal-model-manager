@@ -7,6 +7,7 @@ import {
   mutateAccountStorage,
 } from "../../vendor/antigravity-auth-core/dist/index.js";
 import { getOpenCodeConfigDir } from "../shared/paths.js";
+import { allAdapters, getAdapter } from "./provider-adapter.js";
 
 /**
  * Real provider account stores.
@@ -425,9 +426,9 @@ export function getOpenCodeZenAccounts(configDir = getOpenCodeConfigDir()): Prov
 
 /* ------------------------------ Unified API ----------------------------- */
 
-/** Sanitized account enumeration across both providers (separate main + fallbacks). */
+/** Sanitized account enumeration across all real providers (separate main + fallbacks). */
 export function getAccounts(configDir = getOpenCodeConfigDir()): ProviderAccount[] {
-  return [...getOpenAIAccounts(configDir), ...getAntigravityAccounts(configDir)];
+  return allAdapters().flatMap((a) => a.list(configDir));
 }
 
 /**
@@ -437,18 +438,10 @@ export function getAccounts(configDir = getOpenCodeConfigDir()): ProviderAccount
  * DELEGATED to native login rather than returning a false success.
  */
 export async function setMainByManagerId(configDir: string, managerId: string): Promise<MutationResult> {
-  const anti = getAntigravityAccounts(configDir).find((a) => a.id === managerId);
-  if (anti) return setAntigravityMain(configDir, managerId);
-  const openai = getOpenAIAccounts(configDir).find((a) => a.id === managerId);
-  if (openai) {
-    // No supported config-level primary swap; delegate to native login which
-    // correctly replaces the OpenCode primary and persists mainAccountId.
-    const action = loginActionFor("openai");
-    return {
-      kind: "delegate",
-      action,
-      text: "OpenAI's primary is replaced through native login. Run the action to add the new primary.",
-    };
+  for (const adapter of allAdapters()) {
+    if (adapter.list(configDir).some((a) => a.id === managerId)) {
+      return adapter.setMain(configDir, managerId);
+    }
   }
   return { kind: "invalid", text: `[Manager] Unknown account id: ${managerId}` };
 }
@@ -462,18 +455,7 @@ export async function reorderByManagerIds(configDir: string, managerIds: string[
   if (providers.size !== 1)
     return { kind: "invalid", text: "[Manager] Invalid reorder: ids must name one provider only." };
   const provider = [...providers][0];
-  // The reorderable roster: for OpenAI the separate main slot is not reorderable,
-  // for Antigravity the main is the activeIndex within the single pool.
-  const reorderable = accounts.filter((a) => a.provider === provider && (provider === "openai" ? !a.main : true));
-  const allIds = reorderable.map((a) => a.id);
-  if (!isPermutation(managerIds, allIds)) {
-    return {
-      kind: "invalid",
-      text: "[Manager] Invalid reorder: ids must name every account of the provider once (no duplicates).",
-    };
-  }
-  if (provider === "openai") return reorderOpenAIAccounts(configDir, managerIds);
-  return reorderAntigravityAccounts(configDir, managerIds);
+  return getAdapter(provider).reorder(configDir, managerIds);
 }
 
 /**
@@ -525,43 +507,5 @@ export function loginActionFor(
   provider: "openai" | "antigravity" | "chatgpt-web" | "opencode",
   label?: string,
 ): NativeAction {
-  const _labelArg = label ? ` --label ${JSON.stringify(label)}` : "";
-  if (provider === "openai") {
-    return {
-      provider,
-      kind: "login",
-      command: "/openai-account",
-      arguments: "add",
-      cli: { command: "openai-auth", args: label ? ["login", "--label", label] : ["login"] },
-      text: "Run native login to add an OpenAI/ChatGPT account (replaces the primary).",
-    };
-  }
-  if (provider === "antigravity") {
-    return {
-      provider,
-      kind: "login",
-      command: "/google-account",
-      arguments: "add-oauth-start",
-      cli: { command: "antigravity-auth", args: ["login"] },
-      text: "Run native login to add a Google Antigravity account.",
-    };
-  }
-  if (provider === "opencode") {
-    return {
-      provider,
-      kind: "login",
-      command: "/auth",
-      arguments: "login opencode",
-      cli: { command: "opencode", args: ["auth", "login"] },
-      text: "Run native login to authenticate OpenCode Zen.",
-    };
-  }
-  return {
-    provider,
-    kind: "login",
-    command: "/universal-chatgpt-web",
-    arguments: "login",
-    cli: { command: "universal-auth", args: ["login", "chatgpt-web"] },
-    text: "Run native login to sign in to ChatGPT Web.",
-  };
+  return getAdapter(provider).loginAction(label);
 }

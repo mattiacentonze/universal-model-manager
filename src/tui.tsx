@@ -1,7 +1,7 @@
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { loadConfig, summarize } from "./manager/index.js";
 import { getOpenCodeConfigDir } from "./shared/paths.js";
-import { accountsSettings, openWizard, routerSettings, showReset } from "./tui/dialogs.js";
+import { accountsSettings, fallbackSettings, openWizard, routerSettings, showReset } from "./tui/dialogs.js";
 import { ModelManagerSidebar } from "./tui/sidebar-widget.js";
 
 type Api = TuiPluginApi;
@@ -45,6 +45,14 @@ export const tui: TuiPlugin = async (api, _options, _meta) => {
         category: "model-manager",
         slash: { name: "fallback-list", aliases: ["u-fallbacks"] },
         onSelect: () => routerSettings(api),
+      },
+      {
+        title: "/fallback",
+        value: "model-manager.slash.fallback",
+        description: "Configure per-tier provider-level fallback lists",
+        category: "model-manager",
+        slash: { name: "fallback", aliases: ["u-fallback"] },
+        onSelect: () => fallbackSettings(api),
       },
       {
         title: "/accounts",

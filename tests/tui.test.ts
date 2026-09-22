@@ -167,7 +167,8 @@ describe("TUI wizard + native dispatch", () => {
     const h = makeApi();
     h.setRoute({ name: "session", params: { sessionID: "s1" } });
     accountsSettings(h.api as never);
-    h.find("login-openai")?.onSelect?.();
+    h.find("__add")?.onSelect?.();
+    h.find("openai")?.onSelect?.();
     await vi.waitFor(() => expect(h.command).toHaveBeenCalled());
     expect(h.command).toHaveBeenCalledWith({ sessionID: "s1", command: "openai-account", arguments: "add" });
   });
@@ -176,23 +177,22 @@ describe("TUI wizard + native dispatch", () => {
     const h = makeApi();
     h.setRoute({ name: "home" });
     accountsSettings(h.api as never);
-    h.find("login-openai")?.onSelect?.();
+    h.find("__add")?.onSelect?.();
+    h.find("openai")?.onSelect?.();
     await vi.waitFor(() => expect(h.command).not.toHaveBeenCalled());
   });
 
-  it("OpenAI set-main maps to a native routing preference, not a false primary switch", async () => {
+  it("OpenAI main account is not falsely swappable from the account actions", async () => {
     writeProviderCreds(cfgDir, ["openai"]);
     const h = makeApi();
     h.setRoute({ name: "session", params: { sessionID: "s1" } });
     accountsSettings(h.api as never);
-    const routingOpt = h.find("routing-openai");
-    expect(routingOpt).toBeTruthy();
-    expect(routingOpt?.title).toMatch(/routing/i);
-    routingOpt?.onSelect?.();
-    const mainFirst = h.find("main-first");
-    expect(mainFirst).toBeTruthy();
-    mainFirst?.onSelect?.();
-    // Routing is applied via a silent RPC (no session command dispatched).
+    h.find("openai")?.onSelect?.();
+    const account = h.last()?.options?.find((o) => o.value !== "__back");
+    expect(account).toBeTruthy();
+    account?.onSelect?.();
+    // The OpenAI primary is already main, so no "Set as main" action is offered.
+    expect(h.find("set-main")).toBeUndefined();
     expect(h.command).not.toHaveBeenCalled();
   });
 
@@ -358,20 +358,17 @@ describe("TUI wizard + native dispatch", () => {
     expect(gatherSidebarData(cfgDir).routingMode).toBe("round-robin");
   });
 
-  it("accounts settings offers the general Model Manager routing mode selector", () => {
+  it("accounts settings lists providers with accounts and an add-account entry", () => {
     writeProviderCreds(cfgDir, ["antigravity"]);
     const h = makeApi();
     accountsSettings(h.api as never);
-    const routingManager = h.find("routing-manager");
-    expect(routingManager).toBeTruthy();
-    expect(routingManager?.title).toMatch(/Model Manager routing mode/);
-
-    // Open the selector and pick load-balancing -> persists to manager config.
-    routingManager?.onSelect?.();
-    const loadBalancing = h.find("load-balancing");
-    expect(loadBalancing).toBeTruthy();
-    loadBalancing?.onSelect?.();
-    expect(loadConfig().router.routing?.mode).toBe("load-balancing");
+    // "Add a new account" is the first option, routing to the native connect flow.
+    expect(h.find("__add")).toBeTruthy();
+    // The antigravity provider is listed because it has at least one account.
+    const provider = h.find("antigravity");
+    expect(provider).toBeTruthy();
+    expect(provider?.title).toContain("Google Antigravity");
+    expect(provider?.description).toMatch(/account/);
   });
 
   it("toggleManager, toggleOpenai, and toggleAntigravity update signals and persist preferences", async () => {
