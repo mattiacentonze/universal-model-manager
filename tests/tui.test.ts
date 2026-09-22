@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -342,6 +342,73 @@ describe("TUI wizard + native dispatch", () => {
     const withWeb = gatherSidebarData(cfgDir);
     expect(withWeb.chatgptWeb.exists).toBe(true);
     expect(withWeb.chatgptWeb.alias).toBe("web-alias");
+  });
+
+  it("gatherSidebarData resolves Antigravity aliases by stable account id, not label", () => {
+    // Two real Antigravity accounts sharing the same provider label but with
+    // distinct stable ids (distinct emails) and distinct manager aliases.
+    writeFileSync(
+      join(cfgDir, "antigravity-accounts.json"),
+      `${JSON.stringify({
+        version: 4,
+        activeIndex: 0,
+        activeIndexByFamily: { claude: 0, gemini: 0 },
+        accounts: [
+          {
+            email: "one@example.com",
+            label: "Mattia Centonze",
+            refreshToken: "rt-one",
+            addedAt: 1,
+            lastUsed: 1,
+            enabled: true,
+          },
+          {
+            email: "two@example.com",
+            label: "Mattia Centonze",
+            refreshToken: "rt-two",
+            addedAt: 2,
+            lastUsed: 2,
+            enabled: true,
+          },
+        ],
+      })}\n`,
+    );
+
+    // The manager config mirrors the two real accounts (reconciled by stable id)
+    // with distinct aliases.
+    const cfg = loadConfig();
+    const anti = cfg.accounts.filter((a) => a.kind === "antigravity");
+    expect(anti).toHaveLength(2);
+    anti[0].alias = "alias-one";
+    anti[1].alias = "alias-two";
+    saveConfig(cfg, dataDir);
+
+    // Redacted sidebar state aligned by index with the real store order.
+    const stateFile = join(dataDir, "ag-sidebar-state.json");
+    writeFileSync(
+      stateFile,
+      `${JSON.stringify({
+        accounts: [
+          {
+            id: "acct-0",
+            enabled: true,
+            health: 100,
+            quota: { gemini: { remainingPercent: 80, resetAt: Date.now() + 100000 } },
+          },
+          {
+            id: "acct-1",
+            enabled: true,
+            health: 100,
+            quota: { gemini: { remainingPercent: 80, resetAt: Date.now() + 100000 } },
+          },
+        ],
+      })}\n`,
+    );
+    process.env.ANTIGRAVITY_AUTH_SIDEBAR_STATE_FILE = stateFile;
+
+    const data = gatherSidebarData(cfgDir);
+    // Both distinct aliases survive in store/index order despite the shared label.
+    expect(data.antigravity.accounts.map((a) => a.label)).toEqual(["alias-one", "alias-two"]);
   });
 
   it("gatherSidebarData exposes the general router routing mode, defaulting to main-first", () => {

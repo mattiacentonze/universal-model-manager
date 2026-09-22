@@ -486,10 +486,12 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
 
   const agAccounts: AntigravityDisplayAccount[] = [];
   // Real Antigravity accounts in store order (index-aligned with the redacted
-  // sidebar state) and a label -> manager-account map to resolve aliases.
+  // sidebar state) and a stable account id -> manager-account map to resolve
+  // aliases. Keyed by id, not label, because two real accounts can share a
+  // provider label (e.g. "Mattia Centonze") while having distinct ids.
   const realAnti = getAntigravityAccounts(configDir);
   const activeFamilies = getAntigravityActiveFamilies(configDir);
-  const antiByLabel = new Map(cfg.accounts.filter((x) => x.kind === "antigravity").map((x) => [x.label, x]));
+  const antiById = new Map(cfg.accounts.filter((x) => x.kind === "antigravity").map((x) => [x.id, x]));
   if (Array.isArray(agState?.accounts) && agState.accounts.length > 0) {
     for (const a of agState.accounts) {
       const disabled = a.enabled === false;
@@ -525,11 +527,12 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
       // The sidebar state is redacted (ordinal `acct-N` ids, no email), so it
       // cannot be matched by email or real id. Its index aligns with the real
       // Antigravity store order, so resolve the real account by index, then the
-      // manager alias by the real label. Never assign the main account's alias
-      // to every `current` account (that produced duplicate names).
+      // manager alias by the real stable account id. Never assign the main
+      // account's alias to every `current` account (that produced duplicate
+      // names), and never key by label (two accounts can share a label).
       const idx = /^acct-(\d+)$/.exec(a.id)?.[1];
       const real = idx !== undefined ? realAnti[Number(idx)] : undefined;
-      const mgr = real ? antiByLabel.get(real.label) : undefined;
+      const mgr = real ? antiById.get(real.id) : undefined;
       const label = mgr?.alias || real?.label || a.label || a.id;
 
       // Which family(ies) this account is the active one for, from the real
