@@ -5,8 +5,10 @@ import {
   getAntigravityAccounts,
   getOpenAIAccounts,
   isOpencodeConfigured,
+  removeAntigravityAccount,
   reorderAntigravityAccounts,
   reorderOpenAIAccounts,
+  setAntigravityAccountEnabled,
   setAntigravityMain,
 } from "./provider-accounts.js";
 import type { ProviderKind } from "./types.js";
@@ -25,6 +27,10 @@ export interface ProviderAdapter {
   setMain(configDir: string, managerId: string): Promise<MutationResult>;
   /** Reorder this provider's accounts by manager ids. */
   reorder(configDir: string, orderedIds: string[]): Promise<MutationResult>;
+  /** Enable or disable a real account by manager id. */
+  setEnabled(configDir: string, managerId: string, enabled: boolean): Promise<MutationResult>;
+  /** Remove a real account by manager id. */
+  remove(configDir: string, managerId: string): Promise<MutationResult>;
   /** Native login action to add a new account. */
   loginAction(label?: string): NativeAction;
   /** Whether the provider has at least one real credentialed account. */
@@ -90,6 +96,8 @@ const openaiAdapter: ProviderAdapter = {
     text: "OpenAI's primary is replaced through native login. Run the action to add the new primary.",
   }),
   reorder: (configDir, orderedIds) => reorderOpenAIAccounts(configDir, orderedIds),
+  setEnabled: async () => ({ kind: "invalid", text: "[Manager] Enable/disable is not supported for this provider." }),
+  remove: async () => ({ kind: "invalid", text: "[Manager] Removal is not supported for this provider." }),
   loginAction: (label) => openaiLogin(label),
   configured: (configDir) => getOpenAIAccounts(configDir).some((a) => a.configured),
 };
@@ -100,6 +108,8 @@ const antigravityAdapter: ProviderAdapter = {
   list: (configDir) => getAntigravityAccounts(configDir),
   setMain: (configDir, managerId) => setAntigravityMain(configDir, managerId),
   reorder: (configDir, orderedIds) => reorderAntigravityAccounts(configDir, orderedIds),
+  setEnabled: (configDir, managerId, enabled) => setAntigravityAccountEnabled(configDir, managerId, enabled),
+  remove: (configDir, managerId) => removeAntigravityAccount(configDir, managerId),
   loginAction: () => antigravityLogin(),
   configured: (configDir) => getAntigravityAccounts(configDir).some((a) => a.configured),
 };
@@ -110,6 +120,8 @@ const opencodeAdapter: ProviderAdapter = {
   list: () => [],
   setMain: async () => ({ kind: "invalid", text: "[Manager] OpenCode Zen has no main account to set." }),
   reorder: async () => ({ kind: "invalid", text: "[Manager] OpenCode Zen has no account order to reorder." }),
+  setEnabled: async () => ({ kind: "invalid", text: "[Manager] Enable/disable is not supported for this provider." }),
+  remove: async () => ({ kind: "invalid", text: "[Manager] Removal is not supported for this provider." }),
   loginAction: () => opencodeLogin(),
   configured: (configDir) => isOpencodeConfigured(configDir),
 };
@@ -120,6 +132,8 @@ const chatgptWebAdapter: ProviderAdapter = {
   list: () => [],
   setMain: async () => ({ kind: "invalid", text: "[Manager] ChatGPT Web has no main account to set." }),
   reorder: async () => ({ kind: "invalid", text: "[Manager] ChatGPT Web has no account order to reorder." }),
+  setEnabled: async () => ({ kind: "invalid", text: "[Manager] Enable/disable is not supported for this provider." }),
+  remove: async () => ({ kind: "invalid", text: "[Manager] Removal is not supported for this provider." }),
   loginAction: () => chatgptWebLogin(),
   configured: (configDir) => existsSync(join(getUniversalDataDir(configDir), "chatgpt-storage-state.json")),
 };

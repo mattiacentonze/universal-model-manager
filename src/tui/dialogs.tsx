@@ -18,8 +18,10 @@ import {
   getAccounts,
   loginActionFor,
   type NativeAction,
+  removeByManagerId,
   reorderByManagerIds,
   routingModeAction,
+  setEnabledByManagerId,
   setMainByManagerId,
 } from "../manager/provider-accounts.js";
 import { allAdapters, getAdapter } from "../manager/provider-adapter.js";
@@ -426,6 +428,28 @@ function accountActions(api: Api, kind: ProviderKind, accountId: string) {
               },
             ]
           : []),
+        ...(() => {
+          const real = getAccounts(configDir()).find((a) => a.id === accountId);
+          if (!real || real.provider !== "antigravity") return [];
+          return [
+            {
+              title: real.disabled ? "Enable account" : "Disable account",
+              value: "toggle-enabled",
+              description: real.disabled
+                ? `Re-enable ${account.label} and clear any verification blocks`
+                : `Disable ${account.label}`,
+              onSelect: async () => {
+                const res = await setEnabledByManagerId(configDir(), accountId, real.disabled);
+                api.ui.toast({
+                  variant: res.kind === "applied" ? "success" : "error",
+                  title: res.kind === "applied" ? "Account updated" : "Not updated",
+                  message: res.text,
+                });
+                refresh();
+              },
+            },
+          ];
+        })(),
         {
           title: `Rename alias (current: ${account.alias || "none"})`,
           value: "rename-alias",
@@ -487,12 +511,17 @@ function accountActions(api: Api, kind: ProviderKind, accountId: string) {
               <api.ui.DialogConfirm
                 title={`Delete ${title}?`}
                 message={`Remove ${account.label} from the manager account list?`}
-                onConfirm={() => {
-                  const c = cfg();
-                  c.accounts = c.accounts.filter((a) => a.id !== accountId);
-                  saveConfig(c);
-                  api.ui.toast({ variant: "success", title: "Account removed", message: RESTART });
-                  back();
+                onConfirm={async () => {
+                  const res = await removeByManagerId(configDir(), accountId);
+                  if (res.kind === "applied" || res.kind === "delegate") {
+                    const c = cfg();
+                    c.accounts = c.accounts.filter((a) => a.id !== accountId);
+                    saveConfig(c);
+                    api.ui.toast({ variant: "success", title: "Account removed", message: RESTART });
+                    back();
+                  } else {
+                    api.ui.toast({ variant: "error", title: "Not removed", message: res.text });
+                  }
                 }}
                 onCancel={refresh}
               />

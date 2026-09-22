@@ -360,6 +360,68 @@ export async function reorderAntigravityAccounts(configDir: string, orderedIds: 
     : { kind: "invalid", text: "[Manager] Invalid reorder: ids must name every account once." };
 }
 
+/** Enable or disable a real Antigravity account under the sanctioned lock. */
+export async function setAntigravityAccountEnabled(
+  configDir: string,
+  managerId: string,
+  enabled: boolean,
+): Promise<MutationResult> {
+  const path = join(configDir, ANTIGRAVITY_ACCOUNT_FILE);
+  let found = false;
+  try {
+    await mutateAccountStorage(path, (current) => {
+      const idx = current.accounts.findIndex((m) => accountIdFor("antigravity", antiKey(m)) === managerId);
+      if (idx === -1) return undefined;
+      found = true;
+      const acc = current.accounts[idx];
+      acc.enabled = enabled;
+      if (enabled) {
+        delete acc.verificationRequired;
+        delete acc.verificationRequiredAt;
+        delete acc.verificationRequiredReason;
+        delete acc.verificationUrl;
+        delete acc.accountIneligible;
+        delete acc.accountIneligibleAt;
+        delete acc.accountIneligibleReason;
+        delete acc.eligibilityStateUpdatedAt;
+      }
+      return current;
+    });
+  } catch {
+    return { kind: "invalid", text: "[Manager] Could not update Antigravity account (store lock/unreadable)." };
+  }
+  return found
+    ? { kind: "applied", text: enabled ? "Account enabled." : "Account disabled." }
+    : { kind: "invalid", text: `[Manager] Unknown account id: ${managerId}` };
+}
+
+/** Remove a real Antigravity account from the store under the sanctioned lock. */
+export async function removeAntigravityAccount(configDir: string, managerId: string): Promise<MutationResult> {
+  const path = join(configDir, ANTIGRAVITY_ACCOUNT_FILE);
+  let found = false;
+  try {
+    await mutateAccountStorage(path, (current) => {
+      const idx = current.accounts.findIndex((m) => accountIdFor("antigravity", antiKey(m)) === managerId);
+      if (idx === -1) return undefined;
+      found = true;
+      current.accounts.splice(idx, 1);
+      if (current.activeIndex >= idx) current.activeIndex = Math.max(0, current.activeIndex - 1);
+      if (current.activeIndexByFamily) {
+        for (const fam of ["claude", "gemini"] as const) {
+          const f = current.activeIndexByFamily[fam];
+          if (f !== undefined && f >= idx) current.activeIndexByFamily[fam] = Math.max(0, f - 1);
+        }
+      }
+      return current;
+    });
+  } catch {
+    return { kind: "invalid", text: "[Manager] Could not remove Antigravity account (store lock/unreadable)." };
+  }
+  return found
+    ? { kind: "applied", text: "Account removed from the real store." }
+    : { kind: "invalid", text: `[Manager] Unknown account id: ${managerId}` };
+}
+
 /** Safe permutation check: exact same set, unique ids (fail closed on dupes). */
 function isPermutation(ordered: string[], current: string[]): boolean {
   if (ordered.length !== current.length) return false;
@@ -456,6 +518,30 @@ export async function reorderByManagerIds(configDir: string, managerIds: string[
     return { kind: "invalid", text: "[Manager] Invalid reorder: ids must name one provider only." };
   const provider = [...providers][0];
   return getAdapter(provider).reorder(configDir, managerIds);
+}
+
+/** Enable or disable a real account by manager id across adapters. */
+export async function setEnabledByManagerId(
+  configDir: string,
+  managerId: string,
+  enabled: boolean,
+): Promise<MutationResult> {
+  for (const adapter of allAdapters()) {
+    if (adapter.list(configDir).some((a) => a.id === managerId)) {
+      return adapter.setEnabled(configDir, managerId, enabled);
+    }
+  }
+  return { kind: "invalid", text: `[Manager] Unknown account id: ${managerId}` };
+}
+
+/** Remove a real account by manager id across adapters. */
+export async function removeByManagerId(configDir: string, managerId: string): Promise<MutationResult> {
+  for (const adapter of allAdapters()) {
+    if (adapter.list(configDir).some((a) => a.id === managerId)) {
+      return adapter.remove(configDir, managerId);
+    }
+  }
+  return { kind: "invalid", text: `[Manager] Unknown account id: ${managerId}` };
 }
 
 /**
