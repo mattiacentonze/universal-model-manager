@@ -300,6 +300,8 @@ export interface AntigravityDisplayAccount {
   activeFor?: string;
   families: AntigravityDisplayFamily[];
   health: number;
+  /** True when the account is disabled / needs verification in the real store. */
+  disabled?: boolean;
 }
 
 export interface OpenCodeZenDisplayData {
@@ -490,7 +492,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
   const antiByLabel = new Map(cfg.accounts.filter((x) => x.kind === "antigravity").map((x) => [x.label, x]));
   if (Array.isArray(agState?.accounts) && agState.accounts.length > 0) {
     for (const a of agState.accounts) {
-      if (a.enabled === false) continue;
+      const disabled = a.enabled === false;
       const families: AntigravityDisplayFamily[] = [];
       const gq = a.quota?.gemini;
       const cq = a.quota?.["non-gemini"];
@@ -546,6 +548,7 @@ export function gatherSidebarData(configDir = getOpenCodeConfigDir(), sessionId?
         activeFor: activeFor || undefined,
         families,
         health: Math.round(clamp(a.health ?? 100, 0, 100)),
+        disabled,
       });
     }
   }
@@ -988,8 +991,8 @@ export function ModelManagerSidebar(props: { api: Api; sessionId?: string }) {
                     <text fg={theme().text ?? "#ffffff"}>
                       <b>{acct.label}</b>
                     </text>
-                    <text fg={toneColor(theme(), acct.active ? "ok" : "muted")}>
-                      <b>{acct.active ? `active: ${acct.activeFor}` : "idle"}</b>
+                    <text fg={toneColor(theme(), acct.disabled ? "err" : acct.active ? "ok" : "muted")}>
+                      <b>{acct.disabled ? "disabled" : acct.active ? `active: ${acct.activeFor}` : "idle"}</b>
                     </text>
                   </box>
 
